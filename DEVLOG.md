@@ -38,3 +38,27 @@ Idea: give a codebase a memory of why it changed. Choosing psf/requests as test 
 ### Next
 
 - Add a message-only chunk per commit, skip dependabot merges, return unique commits. Then re-run the same 5 questions and compare.
+
+## 2:15 PM – Fixing retrieval
+
+What I changed:
+
+- Added a summary chunk per commit containing only the message and the list of changed filenames (no code), so the commit's purpose is not drowned out by long diffs. The code chunks are still there.
+- Skipped commits whose message contains "dependabot", which catches bot merge commits that slipped past the author check.
+- Changed search.py to fetch 20 chunks, keep only the best-scoring chunk per commit, then show the top 5 unique commits.
+
+| Commit | Topic | Before | After |
+| --- | --- | --- | --- |
+| dc9dbdf | 3.15 support | no | no (ambiguous question) |
+| 5f3ff9b | typo fixes | no | yes, rank 1 |
+| 25340eb | proxy vars in tests | no | yes, rank 4 |
+| fd62809 | leading slashes | no | no (vocabulary gap: "start of a web address" vs "leading slashes in path_url") |
+| d38495c | broken link | yes | no (ambiguous: all 5 results were real broken-link fixes) |
+
+**Score: 1/5 -> 2/5. On the 3 questions with one clear answer: 2/3.**
+
+Lessons:
+
+- Summary chunks fixed short-message commits.
+- Good test questions need exactly one right answer.
+- Small embedding models miss vocabulary gaps (idea: let the LLM rewrite the question into technical terms before searching).
