@@ -156,6 +156,7 @@ div.stButton > button:hover {
 
 def linkify(text, repo, commits):
     """Turn each [shortsha] citation into a link to that commit on GitHub."""
+    text = normalize_citations(text)  # [ sha ] and 【sha】 become [sha] first
     full_by_short = {commit["sha"][:7]: commit["sha"] for commit in commits}
 
     def replace(match):
@@ -314,6 +315,85 @@ def memory_feed(collection_name_value):
         st.caption(time_ago(metadata.get("added_at")))
 
 
+def build_memory_form(repos, key_prefix="sidebar"):
+    """The 'remember a repo' form, used in the sidebar and on the welcome screen."""
+    input_key = f"{key_prefix}_repo_input"
+    count_key = f"{key_prefix}_repo_count"
+
+    # A suggestion button may ask for a repo to be filled in and built.
+    pending = st.session_state.pop("pending_build", None)
+    if pending:
+        st.session_state[input_key] = pending
+
+    new_repo_input = st.text_input(
+        "GitHub URL or owner/name",
+        placeholder="https://github.com/owner/name",
+        key=input_key,
+    )
+    new_repo_count = st.number_input(
+        "Recent commits",
+        min_value=1,
+        max_value=300,
+        value=100,
+        step=10,
+        key=count_key,
+    )
+
+    # If the repo is already in the memory, we only add what is missing.
+    parsed = parse_repo_input(new_repo_input)
+    already_known = bool(parsed) and parsed in repos
+    button_label = "Update" if already_known else "Build memory"
+    clicked = st.button(button_label, key=f"{key_prefix}_build_btn", width="stretch")
+
+    if not (clicked or pending):
+        return
+
+    if not parsed:
+        st.error("Please enter a GitHub URL like https://github.com/owner/name")
+        return
+
+    target = parsed
+    progress_bar = st.progress(0.0)
+    status_box = st.empty()
+
+    def show_status(message):
+        status_box.markdown(message)
+
+    def show_progress(index, total, short_sha, message):
+        progress_bar.progress(min(index / total, 1.0))
+        show_status(f"Fetching commit {index}/{total} (`{short_sha}`)...")
+
+    try:
+        show_status(f"Checking {target}...")
+        ok, reason = repo_exists(target)
+        if not ok:
+            st.error(reason)
+            return
+
+        commits_data = fetch_commits(
+            target, max_commits=int(new_repo_count), progress=show_progress
+        )
+        progress_bar.progress(1.0)
+        show_status("Embedding...")
+        if already_known:
+            collection, count = add_missing_commits(target, commits_data, progress=show_status)
+        else:
+            collection, count = build_repo_memory(target, commits_data, progress=show_status)
+
+        # Save the commits so the CLI can rebuild later.
+        os.makedirs("data", exist_ok=True)
+        with open(commits_path(target), "w", encoding="utf-8") as f:
+            json.dump(commits_data, f, indent=2, ensure_ascii=False)
+
+        show_status(f"Done: {count} commits remembered")
+        # The rerun below would wipe these messages, so keep them.
+        st.session_state["build_result"] = f"{target}: {count} commits remembered"
+        st.session_state["pending_repo"] = target
+        st.rerun()
+    except Exception as error:
+        st.error(f"Could not build the memory: {error}")
+
+
 model = load_model()
 # A fresh client on every run, so commits added by watch.py show up without a restart.
 client = open_client()
@@ -323,118 +403,54 @@ repos = known_repos(client)
 with st.sidebar:
     st.header("Memory")
     if not repos:
-        st.error("No memory found. Run fetch_commits.py and build_memory.py first.")
-        st.stop()
+        st.caption("No repos yet. Add your first one in the main panel.")
 
-    try:
-        # Demo default first, then whatever REPO says, then the first repo found.
-        default_repo = PREFERRED_REPO if PREFERRED_REPO in repos else get_repo()
-        default_index = sorted(repos).index(default_repo)
-    except (SystemExit, ValueError):
-        default_index = 0
+    if repos:
+        try:
+            # Demo default first, then whatever REPO says, then the first repo found.
+            default_repo = PREFERRED_REPO if PREFERRED_REPO in repos else get_repo()
+            default_index = sorted(repos).index(default_repo)
+        except (SystemExit, ValueError):
+            default_index = 0
 
-    # A repo built just now may not be in the list yet, so add it.
-    picked = st.session_state.get("selected_repo")
-    if picked and picked not in repos:
-        repos[picked] = collection_name(picked)
-        default_index = sorted(repos).index(picked)
+        # A repo built just now may not be in the list yet, so add it.
+        picked = st.session_state.get("selected_repo")
+        if picked and picked not in repos:
+            repos[picked] = collection_name(picked)
+            default_index = sorted(repos).index(picked)
 
-    # A repo that was just built: select it. This has to happen before the
-    # selectbox below is created, because a widget key cannot be changed after.
-    pending = st.session_state.get("pending_repo")
-    if pending:
-        st.session_state["selected_repo"] = pending
+        # A repo that was just built: select it. This has to happen before the
+        # selectbox below is created, because a widget key cannot be changed after.
+        pending = st.session_state.pop("pending_repo", None)
+        if pending:
+            st.session_state["selected_repo"] = pending
 
-    repo = st.selectbox(
-        "Repo",
-        sorted(repos),
-        index=default_index,
-        key="selected_repo",
-    )
-    collection = client.get_collection(repos[repo])
-    # Read the commits fresh: watch.py may have added some since last time.
-    commits = unique_commits(collection)
-
-    st.divider()
-    st.subheader("Memory feed")
-    memory_feed(repos[repo])
-
-    st.divider()
-    with st.expander("Under the hood"):
-        st.write(f"**Collection:** `{repos[repo]}`")
-        st.write(f"**Chunks:** {collection.count()}")
-        st.write("**Embedding model:** `all-MiniLM-L6-v2`")
-        st.write("**LLM:** `openai/gpt-oss-120b` (Groq)")
-        st.write("**Retrieval:** 20 candidates, best chunk per commit, top 5")
-
-    st.divider()
-    st.subheader("Remember a new repo")
-    with st.expander("Add a repo to the memory"):
-        new_repo_input = st.text_input(
-            "GitHub URL or owner/name",
-            placeholder="https://github.com/owner/name",
-            key="new_repo_input",
+        repo = st.selectbox(
+            "Repo",
+            sorted(repos),
+            index=default_index,
+            key="selected_repo",
         )
-        new_repo_count = st.number_input(
-            "Recent commits",
-            min_value=1,
-            max_value=300,
-            value=100,
-            step=10,
-            key="new_repo_count",
-        )
-        # If the repo is already in the memory, we only add what is missing.
-        parsed = parse_repo_input(new_repo_input)
-        already_known = parsed in repos if parsed else False
-        button_label = "Update" if already_known else "Build memory"
+        collection = client.get_collection(repos[repo])
+        # Read the commits fresh: watch.py may have added some since last time.
+        commits = unique_commits(collection)
 
-        if st.button(button_label, key="build_memory_btn", width="stretch"):
-            target = parsed
-            if not target:
-                st.error("Please enter a GitHub URL like https://github.com/owner/name")
-            else:
-                progress_bar = st.progress(0.0)
-                status_box = st.empty()
+        st.divider()
+        st.subheader("Memory feed")
+        memory_feed(repos[repo])
 
-                def show_status(message):
-                    status_box.markdown(message)
+        st.divider()
+        with st.expander("Under the hood"):
+            st.write(f"**Collection:** `{repos[repo]}`")
+            st.write(f"**Chunks:** {collection.count()}")
+            st.write("**Embedding model:** `all-MiniLM-L6-v2`")
+            st.write("**LLM:** `openai/gpt-oss-120b` (Groq)")
+            st.write("**Retrieval:** 20 candidates, best chunk per commit, top 5")
 
-                def show_progress(index, total, short_sha, message):
-                    progress_bar.progress(min(index / total, 1.0))
-                    show_status(f"Fetching commit {index}/{total} (`{short_sha}`)...")
-
-                try:
-                    show_status(f"Checking {target}...")
-                    ok, reason = repo_exists(target)
-                    if not ok:
-                        st.error(reason)
-                    else:
-                        commits_data = fetch_commits(
-                            target, max_commits=int(new_repo_count), progress=show_progress
-                        )
-                        progress_bar.progress(1.0)
-                        show_status("Embedding...")
-                        if already_known:
-                            collection, count = add_missing_commits(
-                                target, commits_data, progress=show_status
-                            )
-                        else:
-                            collection, count = build_repo_memory(
-                                target, commits_data, progress=show_status
-                            )
-                        # Save the commits so the CLI can rebuild later.
-                        os.makedirs("data", exist_ok=True)
-                        with open(commits_path(target), "w", encoding="utf-8") as f:
-                            json.dump(commits_data, f, indent=2, ensure_ascii=False)
-
-                        show_status(f"Done: {count} commits remembered")
-                        # The rerun below would wipe this message, so keep it.
-                        st.session_state["build_result"] = f"{target}: {count} commits remembered"
-                        # Add it to the dropdown and select it.
-                        st.session_state["pending_repo"] = target
-                        st.rerun()
-                except Exception as error:
-                    st.error(f"Could not build the memory: {error}")
+        st.divider()
+        st.subheader("Remember a new repo")
+        with st.expander("Add a repo to the memory"):
+            build_memory_form(repos)
 
 # Show the toasts that were queued before the last rerun.
 for message in st.session_state.pop("pending_toasts", []):
@@ -444,6 +460,21 @@ for message in st.session_state.pop("pending_toasts", []):
 build_result = st.session_state.pop("build_result", None)
 if build_result:
     st.success(build_result)
+
+# Fresh install: no memory yet. Show the welcome and the form, and stop after
+# it, so the selector, feed, timeline and Ask tab stay hidden.
+if not repos:
+    st.title("Repo Memory")
+    st.write("Ask why a codebase changed.")
+    st.info("No repos remembered yet. Paste a public GitHub repo to get started.")
+
+    if st.button("Try psf/requests", key="try_psf", width="stretch"):
+        st.session_state["pending_build"] = "psf/requests"
+
+    with st.expander("Add a repo to the memory", expanded=True):
+        build_memory_form({}, key_prefix="welcome")
+
+    st.stop()
 
 # A new repo means any answer on screen belongs to the old one.
 if st.session_state.get("answer_repo") != repo:
@@ -484,7 +515,7 @@ with tab_ask:
     question = st.text_input(
         "Question",
         key="question",
-        placeholder="Why did they add hasattr checks?",
+        placeholder="Ask why something changed...",
     )
     ask_clicked = st.button("Ask", type="primary") or clicked_suggestion is not None
 

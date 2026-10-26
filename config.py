@@ -10,6 +10,9 @@ load_dotenv()
 
 DEFAULT_REPO = "psf/requests"
 
+# Where ChromaDB keeps its files. Override with CHROMA_PATH (used by tests).
+CHROMA_PATH = os.getenv("CHROMA_PATH", "chroma_db")
+
 
 def parse_repo_input(text):
     """Turn a GitHub URL or 'owner/name' into 'owner/name'.

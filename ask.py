@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from sentence_transformers import SentenceTransformer
 
-from config import collection_name, get_repo
+from config import CHROMA_PATH, collection_name, get_repo
 
 load_dotenv()  # read .env once, when this module is imported
 
@@ -31,6 +31,10 @@ if hasattr(sys.stdout, "reconfigure"):
 SYSTEM_PROMPT = (
     "You answer questions about a software project's commit history. "
     "Use only the commits given to you, never outside knowledge. "
+    "Do not add background knowledge, general programming advice, or facts that "
+    "are not written in the commits. "
+    "If the commits mention a change but do not say why, say that the commit does "
+    "not explain it, instead of guessing. "
     "Cite commits only as [shortsha] in square brackets, for example [6f66281]. "
     "Do not use any other citation format, and cite the commit for every claim. "
     'If the commits do not contain the answer, reply exactly: '
@@ -61,7 +65,7 @@ def open_client():
     Clearing the system cache makes every new query read the current database.
     """
     SharedSystemClient.clear_system_cache()
-    return chromadb.PersistentClient(path="chroma_db")
+    return chromadb.PersistentClient(path=CHROMA_PATH)
 
 
 def open_collection(repo):
@@ -231,8 +235,14 @@ def answer_question(question, matches=None, repo=None):
 
 
 def normalize_citations(answer):
-    """Models sometimes wrap citations in full-width brackets 【sha】; use [sha]."""
-    return re.sub(r"【([0-9a-f]{7})】", r"[\1]", answer)
+    """Tidy up how the model writes citations.
+
+    Models sometimes wrap citations in full-width brackets 【sha】, or put spaces
+    inside them like [ sha ]. Both become [sha], so the app can link them.
+    """
+    answer = re.sub(r"【([0-9a-f]{7})】", r"[\1]", answer)
+    answer = re.sub(r"\[\s*([0-9a-f]{7})\s*\]", r"[\1]", answer)
+    return answer
 
 
 def main():

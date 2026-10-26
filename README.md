@@ -22,7 +22,8 @@ It is like a group chat with two years of messages: the answer is in there somew
 - **Commit timeline.** Every commit in the memory is a dot on a date axis; after an answer, the commits it used light up and the rest fade.
 - **Memory feed.** The sidebar shows the five most recently added commits with "added N minutes ago", refreshing every 30 seconds.
 - **Decision log.** `decisions.py` turns the commit memory into a month-by-month log of design decisions, each with a reason and citations.
-- **Works on any public repo.** Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection. You can also add a repo from the app's "Remember a new repo" box in the sidebar, without touching the command line.
+- **Works on any public repo.** Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection.
+- **Remember a new repo from the UI.** Paste a GitHub URL in the sidebar, pick how many recent commits to read, and press "Build memory". The repo is fetched, embedded and added to the dropdown. If it is already in memory the button says "Update" and only adds the commits you are missing. On a fresh install the same form is the welcome screen, so there is no command line needed to get started.
 
 ## How it works
 
@@ -100,6 +101,8 @@ python search.py --repo psf/requests --rewrite "when did they fix leading slashe
 python decisions.py --repo psf/requests       # writes decisions/psf_requests.md
 streamlit run app.py
 ```
+
+The command line is optional: `streamlit run app.py` alone gives you a welcome screen with a box where you paste a public GitHub URL, and the app fetches, embeds and remembers that repo for you.
 
 `data/` and `chroma_db/` are generated and gitignored. `decisions/` is a normal file you can commit yourself; the watcher regenerates it but never commits it.
 

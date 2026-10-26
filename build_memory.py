@@ -8,7 +8,7 @@ from functools import lru_cache
 import chromadb
 from sentence_transformers import SentenceTransformer
 
-from config import collection_name, commits_path, get_repo
+from config import CHROMA_PATH, collection_name, commits_path, get_repo
 
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 200
@@ -113,7 +113,7 @@ def build_entries(commits):
 
 def add_chunks(ids, documents, metadatas, name, repo, reset=False):
     """Embed chunks and store them in this repo's collection."""
-    client = chromadb.PersistentClient(path="chroma_db")
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
     if reset:
         # Start clean, otherwise rebuilding would store duplicates.
         try:
@@ -160,7 +160,7 @@ def build_repo_memory(repo, commits, progress=None):
 
 def add_missing_commits(repo, commits, progress=None):
     """Add only the commits that are not in the memory yet (same as watch.py)."""
-    client = chromadb.PersistentClient(path="chroma_db")
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
     name = collection_name(repo)
     try:
         collection = client.get_collection(name)

@@ -108,3 +108,15 @@ Three things worth remembering:
 - The SDK renamed `FastMCP` to `MCPServer` in version 2, so the project pins `mcp<2`.
 
 `test_mcp.py` starts the server as a subprocess, lists the tools, and calls `ask_repo_history("When did I test watch mode?")`, which returns the answer plus the five commits it used. Connecting it: in Alan, **Settings → Account → Plugins → MCP → Add custom connector**, connector type **Command**, with the venv Python and `mcp_server.py` as the single argument; in Claude Code, `claude mcp add repo-memory -- "<python path>" "<script path>"`. Both need a path that exists wherever the agent runs, which is why a cloud sandbox wants an HTTPS connector instead.
+
+## 8:30 PM – Remember any repo from the UI
+
+The idea came from a friend who tried the app on a fresh machine: the only way in was the command line, and the first thing they hit was "No memory found" with no way forward. So the app now has a "Remember a new repo" box in the sidebar: paste a GitHub URL, pick how many recent commits to read, press "Build memory", and the repo is fetched, embedded and added to the dropdown. If the repo is already in the memory, the button says "Update" and only adds the commits that are missing, using the same logic as the watcher.
+
+Three bugs came out of that feedback, all of which only a fresh install would show:
+
+- The selectbox key could not be set after the widget was created, so the newly built repo was never selected. It now uses a pending key that is applied before the selectbox is built.
+- The success message was lost on the rerun that followed the build, so the app looked like it had done nothing. It is now kept in session state and shown after the redraw.
+- The form was hidden behind an early stop when no memory existed, which is exactly the case a new user is in. Now nothing stops before the form: a fresh install shows a welcome, the URL form and a psf/requests suggestion, and the selector, timeline, feed and Ask tab stay hidden until a memory exists.
+
+Also tightened the answer prompt so the model does not add background knowledge that is not in the commits, and made sure citations written as [ f140c94 ] or 【f140c94】 are turned into [f140c94] before they are turned into links.
