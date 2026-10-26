@@ -5,7 +5,7 @@ import json
 import os
 import time
 
-from build_memory import add_chunks, build_entries
+from build_memory import add_chunks, build_entries, is_dependabot_merge
 from config import collection_name, get_repo, state_path
 from fetch_commits import API, get_commit_details, get_json
 
@@ -13,10 +13,10 @@ MAX_PAGES = 10  # safety cap: look at most 1000 commits back for the last seen o
 
 
 def is_bot(item):
-    """True if the commit is from a bot or a dependabot merge."""
+    """True for real bot accounts and dependabot merges, not for humans mentioning it."""
     login = (item.get("author") or {}).get("login") or ""
     message = (item.get("commit") or {}).get("message") or ""
-    return login.endswith("[bot]") or "dependabot" in message.lower()
+    return login.endswith("[bot]") or is_dependabot_merge(message)
 
 
 def read_last_sha(path):

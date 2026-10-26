@@ -82,3 +82,13 @@ Caught data leakage: my first rewrite prompt used my own test question as its ex
 **Score: 2/5 without rewrite, 2/5 with rewrite.**
 
 Set temperature=0 so this is repeatable. An earlier run at the default temperature scored 3/5 by finding fd62809 at rank 2, but that result does not reproduce at temperature=0, so the gain was sampling luck rather than a real improvement.
+
+## 5:00 PM – Testing on my own repo
+
+Running the whole pipeline on borahliza101/repo-memory exposed three bugs that psf/requests never showed:
+
+- The bot filter was too broad: it dropped any commit whose message contained "dependabot", so two of my own commits disappeared from the memory. It now skips only bot accounts ("[bot]" logins) and merges of dependabot pull requests ("Merge pull request" plus "/dependabot/"). After the fix psf/requests keeps 215 commits (28 skipped, down from 30), and my repo keeps all 10 (0 skipped, where 2 would have been lost).
+- The rewrite prompt said "a Python HTTP library", so on a small personal repo it rewrote questions towards the wrong vocabulary. It now uses the actual repo name.
+- The model sometimes cited commits with full-width brackets (【sha】), which the app's link conversion did not recognise, so those citations came out as plain text. Answers are now normalised to [sha] before links are built.
+
+Testing on a second repo was worth more than another question on the first one: every bug was about an assumption that happened to hold for a big, well-labelled library.

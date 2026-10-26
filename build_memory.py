@@ -57,6 +57,18 @@ def split_text(text):
     return chunks
 
 
+def is_dependabot_merge(message):
+    """A merge commit that brought in a dependabot pull request."""
+    first_line = message.splitlines()[0] if message else ""
+    return first_line.startswith("Merge pull request") and "/dependabot/" in first_line
+
+
+def is_bot_commit(commit):
+    """Skip real bots and dependabot merges, but keep humans who mention the word."""
+    author = commit.get("author") or ""
+    return author.endswith("[bot]") or is_dependabot_merge(commit.get("message") or "")
+
+
 def build_entries(commits):
     """Turn commits into chunks: one summary chunk plus the code chunks each.
 
@@ -68,8 +80,7 @@ def build_entries(commits):
     skipped = 0
 
     for commit in commits:
-        # Skip bot merges too: their author looks human, but the message names dependabot.
-        if "dependabot" in commit["message"].lower():
+        if is_bot_commit(commit):
             skipped += 1
             continue
 

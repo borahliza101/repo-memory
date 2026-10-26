@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import sys
 from functools import lru_cache
 
@@ -34,7 +35,7 @@ SYSTEM_PROMPT = (
 
 REWRITE_PROMPT = (
     "You rewrite a user's question so it matches how developers write commit "
-    "messages in a Python HTTP library (requests). "
+    "messages in the repository {repo}. "
     "Use the technical words those commits would use. "
     'For example "why do my login details disappear between requests" becomes '
     '"session cookie persistence, cookie jar". '
@@ -63,12 +64,12 @@ def get_groq_client():
     return Groq(api_key=api_key)
 
 
-def rewrite_query(question):
+def rewrite_query(question, repo):
     """Turn a user's wording into the technical words used in commit messages."""
     response = get_groq_client().chat.completions.create(
         model=LLM_MODEL,
         messages=[
-            {"role": "system", "content": REWRITE_PROMPT},
+            {"role": "system", "content": REWRITE_PROMPT.format(repo=repo)},
             {"role": "user", "content": question},
         ],
         temperature=0,  # same question should give the same query every time
@@ -93,7 +94,7 @@ def retrieve(question, model=None, collection=None, rewrite=False, repo=None):
     rewritten = None
     queries = [question]
     if rewrite:
-        rewritten = rewrite_query(question)
+        rewritten = rewrite_query(question, repo)
         queries.append(rewritten)
 
     # Keep only the best chunk for each commit, so one commit can't fill the list.
@@ -150,7 +151,12 @@ def answer_question(question, matches=None, repo=None):
             },
         ],
     )
-    return response.choices[0].message.content.strip(), matches
+    return normalize_citations(response.choices[0].message.content.strip()), matches
+
+
+def normalize_citations(answer):
+    """Models sometimes wrap citations in full-width brackets 【sha】; use [sha]."""
+    return re.sub(r"【([0-9a-f]{7})】", r"[\1]", answer)
 
 
 def main():
