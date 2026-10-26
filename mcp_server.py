@@ -1,4 +1,4 @@
-"""MCP server: expose Repo Memory as tools for coding agents.
+﻿"""MCP server: expose Repo Memory as tools for coding agents.
 
 Runs over stdio, so it must never print to stdout (stdout carries the protocol).
 Anything diagnostic belongs on stderr, and these tools don't print at all.
@@ -10,8 +10,11 @@ import os
 from chromadb.errors import NotFoundError
 from mcp.server.fastmcp import FastMCP
 
-from ask import answer_question, format_ist, get_model, retrieve
-from config import decisions_path
+from repo_memory.config import decisions_path
+from repo_memory.llm import answer_question
+from repo_memory.retrieval import retrieve
+from repo_memory.store import get_model
+from repo_memory.timefmt import format_ist
 
 # Keep the logs quiet: stdout carries the MCP protocol, and noise makes the
 # server harder to debug. Anything useful goes to stderr.
@@ -66,7 +69,7 @@ def ask_repo_history(question: str, repo: str = DEFAULT_REPO) -> dict:
     except NotFoundError:
         return _missing_memory(repo)
 
-    answer, matches = answer_question(question, matches, repo=repo)
+    answer = answer_question(question, matches, repo=repo)
     return {
         "repo": repo,
         "answer": answer,

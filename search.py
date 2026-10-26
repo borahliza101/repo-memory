@@ -2,8 +2,8 @@
 
 import argparse
 
-from ask import retrieve
-from config import get_repo
+from repo_memory.config import get_repo
+from repo_memory.retrieval import retrieve
 
 
 def main():

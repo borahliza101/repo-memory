@@ -74,6 +74,38 @@ The real lesson: five questions is far too few. A 1/5 versus 2/5 difference is o
 - **Small embedding model.** `all-MiniLM-L6-v2` misses vocabulary gaps ("start of a web address" versus "leading slashes in path_url"). Query rewriting helps sometimes, but a larger model is the more direct fix.
 - **The decision log is only as good as the commits.** Many entries honestly say "no reason given in the commit", because that is all the history contains.
 
+## Project layout
+
+```
+repo_memory/          the package, one job per module
+  config.py           repo parsing, file paths, ChromaDB location
+  github_client.py    GitHub API: list commits, fetch details, check a repo
+  chunking.py         commits -> summary + code chunks (pure text)
+  store.py            ChromaDB: collections, embeddings, add/update memory
+  retrieval.py        find the best commits for a question
+  llm.py              Groq: rewrite the question, stream the answer, tidy citations
+  decisions.py        commit memory -> decision log
+  watcher.py          add new commits and refresh the decision log
+  timefmt.py          UTC -> IST timestamps
+app/app.py            the Streamlit app
+mcp_server.py         MCP tools for coding agents
+fetch_commits.py      thin CLIs
+build_memory.py
+ask.py
+search.py
+decisions.py
+watch.py
+```
+
+`app.py` in the project root is only a two-line entry point, so `streamlit run app.py` still works; `streamlit run app/app.py` works too. The CLI scripts are thin wrappers over the package, so the command line, the web app and the MCP server all run the same code.
+
+Run the tests:
+
+```bash
+python -m unittest discover -s tests -v
+python test_mcp.py
+```
+
 ## How to run it
 
 ```bash

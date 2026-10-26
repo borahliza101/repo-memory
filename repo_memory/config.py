@@ -1,4 +1,4 @@
-"""Shared settings: which repo to use, and where its data lives."""
+"""Shared settings: which repo to use, and where its files live."""
 
 import os
 import re
@@ -46,23 +46,26 @@ def get_repo(explicit=None):
     return repo
 
 
-def _slug(repo):
+def slugify(repo):
     """Make 'owner/name' safe for a file name and a collection name."""
     return re.sub(r"[^a-zA-Z0-9._-]", "_", repo.replace("/", "_")).lower()
 
 
 def collection_name(repo):
     """Every repo gets its own ChromaDB collection, e.g. commits_psf_requests."""
-    return f"commits_{_slug(repo)}"
+    return f"commits_{slugify(repo)}"
 
 
 def commits_path(repo):
-    return os.path.join("data", f"commits_{_slug(repo)}.json")
+    """Where fetch_commits.py saves the raw commits for a repo."""
+    return os.path.join("data", f"commits_{slugify(repo)}.json")
 
 
 def state_path(repo):
-    return os.path.join("data", f"state_{_slug(repo)}.json")
+    """Where the watcher remembers the last commit it saw."""
+    return os.path.join("data", f"state_{slugify(repo)}.json")
 
 
 def decisions_path(repo):
-    return os.path.join("decisions", f"{_slug(repo)}.md")
+    """Where decisions.py writes the decision log."""
+    return os.path.join("decisions", f"{slugify(repo)}.md")
