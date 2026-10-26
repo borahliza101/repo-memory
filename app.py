@@ -7,14 +7,15 @@ import chromadb
 import plotly.graph_objects as go
 import streamlit as st
 
-from ask import answer_question, get_model, retrieve
+from ask import answer_question, format_ist, get_model, retrieve, to_ist
 from config import get_repo
 
 # Page settings must be set before any other Streamlit output.
 st.set_page_config(page_title="Repo Memory", page_icon="🧠")
 
 COLOR_USED = "#8b5cf6"  # violet dot for commits the answer used
-COLOR_OTHER = "rgba(148, 163, 184, 0.30)"  # faded dot for the rest
+COLOR_OTHER = "rgba(203, 213, 225, 0.6)"  # light grey for the rest
+PREFERRED_REPO = "borahliza101/repo-memory"  # demo default, when it has a memory
 
 
 def linkify(answer, matches, repo):
@@ -63,31 +64,33 @@ def timeline_figure(commits, used_shas):
 
     figure = go.Figure(
         go.Scatter(
-            x=[commit["date"] for commit in commits],
+            x=[to_ist(commit["date"]).replace(tzinfo=None) for commit in commits],
             y=[0] * len(commits),
             mode="markers+text",
             marker={
-                "size": [17 if flag else 6 for flag in is_used],
+                "size": [18 if flag else 10 for flag in is_used],
                 "color": [COLOR_USED if flag else COLOR_OTHER for flag in is_used],
+                "line": {"width": 0},
             },
             text=[commit["sha"][:7] if flag else "" for commit, flag in zip(commits, is_used)],
             textposition="top center",
             textfont={"size": 11, "color": "#e2e8f0"},
+            cliponaxis=False,  # keep sha labels visible above the dots
             hovertext=[
-                f"{commit['sha'][:7]} · {commit['date'][:10]}<br>{commit['message']}"
+                f"{commit['sha'][:7]} · {format_ist(commit['date'])}<br>{commit['message']}"
                 for commit in commits
             ],
             hovertemplate="%{hovertext}<extra></extra>",
         )
     )
     figure.update_layout(
-        height=170,
-        margin={"l": 10, "r": 10, "t": 32, "b": 10},
+        height=180,
+        margin={"l": 8, "r": 8, "t": 26, "b": 8},  # tight margins: no dead space
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
         xaxis={"type": "date", "showgrid": False, "zeroline": False, "color": "#94a3b8"},
-        yaxis={"visible": False, "range": [-1, 1]},
+        yaxis={"visible": False, "range": [-0.25, 0.25], "fixedrange": True},
         hoverlabel={"bgcolor": "#1f2937", "font": {"color": "#e5e7eb"}},
     )
     return figure
@@ -143,7 +146,8 @@ with st.sidebar:
         st.stop()
 
     try:
-        default_repo = get_repo()  # REPO from .env, if it has a memory
+        # Demo default first, then whatever REPO says, then the first repo found.
+        default_repo = PREFERRED_REPO if PREFERRED_REPO in repos else get_repo()
         default_index = sorted(repos).index(default_repo)
     except (SystemExit, ValueError):
         default_index = 0
@@ -165,11 +169,12 @@ if st.session_state.get("answer_repo") != repo:
         st.session_state.pop(key, None)
 
 if commits:
-    last_updated = commits[-1]["date"][:10]
+    last_updated = format_ist(commits[-1]["date"])
 else:
     last_updated = "never"
 
 st.title("Repo Memory")
+st.write("Ask why a codebase changed.")
 st.markdown(f"**{repo}** · {len(commits)} commits remembered · last updated {last_updated}")
 timeline_slot = st.empty()
 
@@ -213,6 +218,6 @@ if st.session_state.get("answer"):
         short_sha = metadata["sha"][:7]
         url = f"https://github.com/{repo}/commit/{metadata['sha']}"
         with st.container(border=True):
-            st.markdown(f"**[{short_sha}]({url})** — {metadata['date'][:10]}")
+            st.markdown(f"**[{short_sha}]({url})** — {format_ist(metadata['date'])}")
             st.caption(metadata["author"])
             st.write(metadata["message"])

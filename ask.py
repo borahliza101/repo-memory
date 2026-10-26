@@ -21,6 +21,7 @@ MODEL_NAME = "all-MiniLM-L6-v2"  # same embedding model used to build the memory
 LLM_MODEL = "openai/gpt-oss-120b"
 CANDIDATES = 20  # chunks to fetch before we pick the best per commit
 RESULTS = 5
+IST = ZoneInfo("Asia/Kolkata")  # GitHub gives UTC; show times to the user in IST
 
 # Windows consoles can't always print special characters from the model's answer.
 if hasattr(sys.stdout, "reconfigure"):
@@ -56,6 +57,18 @@ def get_collection(repo):
     """Open this repo's ChromaDB collection once and reuse it afterwards."""
     client = chromadb.PersistentClient(path="chroma_db")
     return client.get_collection(collection_name(repo))
+
+
+def to_ist(iso_text):
+    """Convert a GitHub UTC timestamp (e.g. 2026-06-09T07:15:57Z) to IST."""
+    return datetime.fromisoformat(iso_text.replace("Z", "+00:00")).astimezone(IST)
+
+
+def format_ist(iso_text):
+    """Show a GitHub UTC timestamp as a readable IST date and time."""
+    if not iso_text:
+        return "unknown"
+    return to_ist(iso_text).strftime("%Y-%m-%d %H:%M IST")
 
 
 def get_groq_client():
@@ -129,7 +142,7 @@ def build_context(matches):
     for match in matches:
         metadata = match["metadata"]
         blocks.append(
-            f"Commit {metadata['sha'][:7]} by {metadata['author']} on {metadata['date'][:10]}\n"
+            f"Commit {metadata['sha'][:7]} by {metadata['author']} on {format_ist(metadata['date'])}\n"
             f"Message: {metadata['message']}\n"
             f"Code and files:\n{match['document']}"
         )
@@ -185,7 +198,7 @@ def main():
     print("Commits used:")
     for rank, match in enumerate(matches, start=1):
         metadata = match["metadata"]
-        print(f"{rank}. {metadata['sha'][:7]}  {metadata['date'][:10]}  {metadata['message']}")
+        print(f"{rank}. {metadata['sha'][:7]}  {format_ist(metadata['date'])}  {metadata['message']}")
 
 
 if __name__ == "__main__":

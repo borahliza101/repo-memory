@@ -11,7 +11,7 @@ from build_memory import add_chunks, build_entries, is_dependabot_merge
 from config import collection_name, get_repo, state_path
 from fetch_commits import API, get_commit_details, get_json
 
-MAX_PAGES = 10  # safety cap: look at most 1000 commits back for the last seen one
+RECENT_COMMITS = 100  # how many recent commits we compare against the memory
 
 
 def is_bot(item):
@@ -21,87 +21,55 @@ def is_bot(item):
     return login.endswith("[bot]") or is_dependabot_merge(message)
 
 
-def read_last_sha(path):
-    """Read the last sha we saw, or None on the very first run."""
-    if not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as f:
-        return json.load(f).get("last_sha")
-
-
 def save_last_sha(path, sha):
-    """Remember where to resume the next time we check."""
+    """Record the newest sha we saw, so the state file shows the last check."""
     os.makedirs("data", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"last_sha": sha}, f)
 
 
-def new_commits_since(repo, last_sha):
-    """Return commits newer than last_sha, oldest first."""
-    found = []
-    for page in range(1, MAX_PAGES + 1):
-        batch = get_json(f"{API}/repos/{repo}/commits?per_page=100&page={page}")
-        if not batch:
-            break
-        for item in batch:
-            if item["sha"] == last_sha:
-                return list(reversed(found))
-            found.append(item)
-        if len(batch) < 100:
-            break  # repo has fewer commits than we looked at
-    return list(reversed(found))
+def recent_commits(repo):
+    """The newest commits from GitHub, newest first (one page of 100)."""
+    return get_json(f"{API}/repos/{repo}/commits?per_page={RECENT_COMMITS}&page=1")
 
 
-def newest_stored_sha(name):
-    """The newest commit already in the memory, or None if the memory is empty."""
+def stored_shas(name):
+    """Every commit sha already in this repo's collection."""
     client = chromadb.PersistentClient(path="chroma_db")
     try:
         collection = client.get_collection(name)
     except Exception:
-        return None  # no memory for this repo yet
+        return set()  # no memory for this repo yet
     metadatas = collection.get(include=["metadatas"])["metadatas"]
-    if not metadatas:
-        return None
-    return max(metadatas, key=lambda metadata: metadata["date"])["sha"]
+    return {metadata["sha"] for metadata in metadatas}
 
 
 def check_once(repo, state_file, name):
-    """Look for new commits and add them to this repo's collection."""
-    last_sha = read_last_sha(state_file)
+    """Add every recent commit that is not in the memory yet.
 
-    if last_sha is None:
-        # First run: resume from the newest commit we already stored, so commits
-        # made between the last build and now are not missed.
-        last_sha = newest_stored_sha(name)
-        if last_sha is None:
-            # Nothing in memory: just remember GitHub's newest commit.
-            newest = get_json(f"{API}/repos/{repo}/commits?per_page=1")
-            if not newest:
-                print("Repo has no commits yet.")
-                return
-            save_last_sha(state_file, newest[0]["sha"])
-            print(
-                f"First run: memory is empty, starting from {newest[0]['sha'][:7]}. "
-                "Run build_memory.py to fill it."
-            )
-            return
-        save_last_sha(state_file, last_sha)
-        print(f"First run: starting from stored commit {last_sha[:7]}.")
+    Comparing full sha sets (not just the newest commit) means commits that were
+    missed earlier are picked up too, not only commits newer than the last check.
+    """
+    commits = recent_commits(repo)
+    if not commits:
+        print("Repo has no commits yet.")
+        return
 
-    commits = new_commits_since(repo, last_sha)
+    known = stored_shas(name)
+    missing = [
+        item for item in commits if item["sha"] not in known and not is_bot(item)
+    ]
+
     added = []
-    for item in commits:
-        if is_bot(item):
-            continue
-
+    # Oldest first, so the newest commit is added last (and tops the feed).
+    for item in reversed(missing):
         details = get_commit_details(repo, item["sha"])
         # Each new commit gets a summary chunk and its code chunks, like build_memory.
         ids, documents, metadatas, _ = build_entries([details])
         add_chunks(ids, documents, metadatas, name, repo)
         added.append(f"{details['sha'][:7]} {details['message'].splitlines()[0]}")
 
-    if commits:
-        save_last_sha(state_file, commits[-1]["sha"])
+    save_last_sha(state_file, commits[0]["sha"])
 
     if added:
         print(f"Added {len(added)} new commits: " + ", ".join(added))

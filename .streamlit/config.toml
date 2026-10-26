@@ -7,3 +7,6 @@ textColor = "#e6e6e6"
 
 [server]
 fileWatcherType = "none"
+
+[client]
+toolbarMode = "minimal"
