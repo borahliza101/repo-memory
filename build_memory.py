@@ -1,14 +1,24 @@
-"""Turn data/commits.json into a searchable ChromaDB collection."""
+"""Turn a repo's commit JSON file into a searchable ChromaDB collection."""
 
+import argparse
 import json
-import os
+from functools import lru_cache
 
 import chromadb
 from sentence_transformers import SentenceTransformer
 
+from config import collection_name, commits_path, get_repo
+
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 200
 MODEL_NAME = "all-MiniLM-L6-v2"
+BATCH_SIZE = 100
+
+
+@lru_cache(maxsize=1)
+def get_model():
+    """Load the embedding model once and reuse it afterwards."""
+    return SentenceTransformer(MODEL_NAME)
 
 
 def make_summary(commit):
@@ -47,17 +57,16 @@ def split_text(text):
     return chunks
 
 
-def main():
-    # 1. Load the commits we fetched earlier.
-    with open(os.path.join("data", "commits.json"), encoding="utf-8") as f:
-        commits = json.load(f)
-    print(f"Loaded {len(commits)} commits")
+def build_entries(commits):
+    """Turn commits into chunks: one summary chunk plus the code chunks each.
 
-    # 2. Build text documents for each commit, then split them into chunks.
+    Returns (ids, documents, metadatas, skipped_bot_commits).
+    """
     ids = []
     documents = []
     metadatas = []
     skipped = 0
+
     for commit in commits:
         # Skip bot merges too: their author looks human, but the message names dependabot.
         if "dependabot" in commit["message"].lower():
@@ -83,38 +92,58 @@ def main():
             documents.append(chunk)
             metadatas.append(metadata)
 
-    print(f"Skipped {skipped} bot commits")
-    print(f"Built {len(documents)} chunks from {len(commits) - skipped} commits")
+    return ids, documents, metadatas, skipped
 
-    # 3. Embed every chunk locally. The model downloads once, then works offline.
-    print(f"Loading embedding model {MODEL_NAME}...")
-    model = SentenceTransformer(MODEL_NAME)
-    print("Embedding chunks (this may take a minute)...")
-    embeddings = model.encode(documents, show_progress_bar=True).tolist()
 
-    # 4. Store everything in a persistent database so it survives restarts.
+def add_chunks(ids, documents, metadatas, name, repo, reset=False):
+    """Embed chunks and store them in this repo's collection."""
     client = chromadb.PersistentClient(path="chroma_db")
-    # Start clean, otherwise running this twice would store duplicates.
-    try:
-        client.delete_collection("commits")
-    except Exception:
-        pass  # no collection yet, nothing to delete
-    collection = client.create_collection("commits")
+    if reset:
+        # Start clean, otherwise rebuilding would store duplicates.
+        try:
+            client.delete_collection(name)
+        except Exception:
+            pass  # no collection yet, nothing to delete
 
-    # Add in batches to keep memory use low.
-    batch_size = 100
-    for start in range(0, len(ids), batch_size):
-        end = start + batch_size
-        collection.add(
+    # The collection remembers which repo it belongs to, for the app dropdown.
+    collection = client.get_or_create_collection(name, metadata={"repo": repo})
+    if not documents:
+        return collection
+
+    print(f"Embedding {len(documents)} chunks...")
+    embeddings = get_model().encode(documents, show_progress_bar=True).tolist()
+
+    # Add in batches to keep memory use low. Upsert never crashes on chunks we
+    # already saved, so re-checking a commit is safe.
+    for start in range(0, len(ids), BATCH_SIZE):
+        end = start + BATCH_SIZE
+        collection.upsert(
             ids=ids[start:end],
             documents=documents[start:end],
             embeddings=embeddings[start:end],
             metadatas=metadatas[start:end],
         )
+    return collection
 
-    print(
-        f"Stored {len(commits) - skipped} commits and {collection.count()} chunks in chroma_db/"
-    )
+
+def main():
+    parser = argparse.ArgumentParser(description="Build the searchable commit memory.")
+    parser.add_argument("--repo", help="owner/name (default: REPO from .env, else psf/requests)")
+    args = parser.parse_args()
+    repo = get_repo(args.repo)
+
+    path = commits_path(repo)
+    with open(path, encoding="utf-8") as f:
+        commits = json.load(f)
+    print(f"Loaded {len(commits)} commits from {path}")
+
+    ids, documents, metadatas, skipped = build_entries(commits)
+    print(f"Skipped {skipped} bot commits")
+    print(f"Built {len(documents)} chunks from {len(commits) - skipped} commits")
+
+    name = collection_name(repo)
+    collection = add_chunks(ids, documents, metadatas, name, repo, reset=True)
+    print(f"Stored {len(commits) - skipped} commits and {collection.count()} chunks in {name}")
 
 
 if __name__ == "__main__":

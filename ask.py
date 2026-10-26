@@ -1,5 +1,6 @@
 """Answer a question about the commit history using a Groq-hosted LLM."""
 
+import argparse
 import os
 import sys
 from functools import lru_cache
@@ -8,6 +9,8 @@ import chromadb
 from dotenv import load_dotenv
 from groq import Groq
 from sentence_transformers import SentenceTransformer
+
+from config import collection_name, get_repo
 
 load_dotenv()  # read .env once, when this module is imported
 
@@ -45,11 +48,11 @@ def get_model():
     return SentenceTransformer(MODEL_NAME)
 
 
-@lru_cache(maxsize=1)
-def get_collection():
-    """Open the stored ChromaDB collection once and reuse it afterwards."""
+@lru_cache(maxsize=None)
+def get_collection(repo):
+    """Open this repo's ChromaDB collection once and reuse it afterwards."""
     client = chromadb.PersistentClient(path="chroma_db")
-    return client.get_collection("commits")
+    return client.get_collection(collection_name(repo))
 
 
 def get_groq_client():
@@ -76,15 +79,16 @@ def rewrite_query(question):
     return query or question
 
 
-def retrieve(question, model=None, collection=None, rewrite=False):
+def retrieve(question, model=None, collection=None, rewrite=False, repo=None):
     """Find the top 5 unique commits, each with its best matching chunk.
 
     With rewrite=True the question is also asked in technical terms and both
     searches are merged, keeping each commit's best (smallest) distance.
     Returns (matches, rewritten_query), where rewritten_query is None if unused.
     """
+    repo = repo or get_repo()
     model = model or get_model()
-    collection = collection or get_collection()
+    collection = collection or get_collection(repo)
 
     rewritten = None
     queries = [question]
@@ -129,10 +133,10 @@ def build_context(matches):
     return "\n\n---\n\n".join(blocks)
 
 
-def answer_question(question, matches=None):
+def answer_question(question, matches=None, repo=None):
     """Return (answer, matches): the model's answer and the commits it saw."""
     if matches is None:
-        matches, _ = retrieve(question, rewrite=True)
+        matches, _ = retrieve(question, rewrite=True, repo=repo)
     if not matches:
         return "I couldn't find this in the history", matches
 
@@ -150,17 +154,21 @@ def answer_question(question, matches=None):
 
 
 def main():
-    # The question comes from the command line.
-    question = " ".join(sys.argv[1:]).strip()
-    if not question:
-        raise SystemExit('Usage: python ask.py "your question here"')
+    # The question and the repo come from the command line.
+    parser = argparse.ArgumentParser(description="Ask a question about a repo's history.")
+    parser.add_argument("--repo", help="owner/name (default: REPO from .env, else psf/requests)")
+    parser.add_argument("question", nargs="+", help="the question to ask")
+    args = parser.parse_args()
+
+    question = " ".join(args.question).strip()
+    repo = get_repo(args.repo)
 
     # Find the commits that probably contain the answer, then ask the model.
-    print(f"Searching for: {question}")
+    print(f"Searching {repo} for: {question}")
     try:
-        matches, rewritten = retrieve(question, rewrite=True)
+        matches, rewritten = retrieve(question, rewrite=True, repo=repo)
         print(f"Rewritten query: {rewritten}")
-        answer, matches = answer_question(question, matches)
+        answer, matches = answer_question(question, matches, repo=repo)
     except RuntimeError as error:
         raise SystemExit(str(error))
 

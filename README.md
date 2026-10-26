@@ -36,3 +36,22 @@ Every answer cites the exact commits it came from, so you can check it.
 ## Dev log
 
 See DEVLOG.md for how my thinking changed while building this.
+
+## Watch mode
+
+`watch.py` keeps the memory up to date while you work. Every few seconds it checks for commits that arrived since the last check and adds them to the existing memory. Nothing is rebuilt.
+
+```
+python watch.py --repo psf/requests --interval 60
+```
+
+The first run only records the newest commit as a starting point, so build the memory first:
+
+```
+python fetch_commits.py --repo psf/requests
+python build_memory.py --repo psf/requests
+```
+
+The last seen commit is saved in `data/state_<repo>.json`, and bot commits are skipped. New commits get the same treatment as the initial build: one summary chunk plus the code chunks.
+
+Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection (`commits_psf_requests`, `commits_borahliza101_repo-memory`). You can also set `REPO=owner/name` in `.env` instead of passing the flag.

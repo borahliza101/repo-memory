@@ -1,5 +1,6 @@
-"""Fetch recent commits from psf/requests and save them to data/commits.json."""
+"""Fetch recent commits from GitHub and save them to a JSON file."""
 
+import argparse
 import json
 import os
 import time
@@ -7,54 +8,55 @@ import time
 import requests
 from dotenv import load_dotenv
 
-# Load the token from the .env file (never print it).
-load_dotenv()
-TOKEN = os.getenv("GITHUB_TOKEN")
-if not TOKEN:
-    raise SystemExit("GITHUB_TOKEN is missing from .env")
+from config import commits_path, get_repo
 
-REPO = "psf/requests"
+load_dotenv()
+
 MAX_COMMITS = 300
 PER_PAGE = 100
 PATCH_LIMIT = 3000  # cut long code patches down to this many characters
-
-# All GitHub API calls use this header so we get permission and a higher rate limit.
-HEADERS = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
 API = "https://api.github.com"
+
+
+def get_headers():
+    """Build the GitHub headers. The token is never printed."""
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN is missing from .env")
+    return {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
 
 
 def get_json(url):
     """Call the GitHub API and return the JSON response."""
-    response = requests.get(url, headers=HEADERS, timeout=30)
+    response = requests.get(url, headers=get_headers(), timeout=30)
     if response.status_code == 403 and response.headers.get("X-RateLimit-Remaining") == "0":
         # We ran out of requests; wait until GitHub resets the limit.
         reset = int(response.headers.get("X-RateLimit-Reset", time.time() + 60))
         wait = max(reset - int(time.time()), 1)
         print(f"Rate limit hit. Waiting {wait} seconds...")
         time.sleep(wait)
-        response = requests.get(url, headers=HEADERS, timeout=30)
+        response = requests.get(url, headers=get_headers(), timeout=30)
     response.raise_for_status()
     return response.json()
 
 
-def list_commits():
-    """Get the newest commits, a page at a time."""
+def list_commits(repo, max_commits=MAX_COMMITS, per_page=PER_PAGE):
+    """Get the newest commits of a repo, a page at a time."""
     commits = []
     page = 1
-    while len(commits) < MAX_COMMITS:
-        url = f"{API}/repos/{REPO}/commits?per_page={PER_PAGE}&page={page}"
-        batch = get_json(url)
+    while len(commits) < max_commits:
+        batch = get_json(f"{API}/repos/{repo}/commits?per_page={per_page}&page={page}")
         if not batch:
             break
         commits.extend(batch)
         print(f"Listed page {page}: {len(batch)} commits")
         page += 1
-    return commits[:MAX_COMMITS]
+    return commits[:max_commits]
 
 
-def get_commit_details(sha):
+def get_commit_details(repo, sha):
     """Get one commit with its message, author, date and changed files."""
-    data = get_json(f"{API}/repos/{REPO}/commits/{sha}")
+    data = get_json(f"{API}/repos/{repo}/commits/{sha}")
     commit = data["commit"]
 
     files = []
@@ -77,7 +79,12 @@ def get_commit_details(sha):
 
 
 def main():
-    raw_commits = list_commits()
+    parser = argparse.ArgumentParser(description="Fetch recent commits from GitHub.")
+    parser.add_argument("--repo", help="owner/name (default: REPO from .env, else psf/requests)")
+    args = parser.parse_args()
+    repo = get_repo(args.repo)
+
+    raw_commits = list_commits(repo)
     print(f"Found {len(raw_commits)} commits, now skipping bots and fetching details...")
 
     results = []
@@ -87,16 +94,18 @@ def main():
             print(f"[{index}/{len(raw_commits)}] Skipping bot commit ({login})")
             continue
 
-        details = get_commit_details(item["sha"])
+        details = get_commit_details(repo, item["sha"])
         results.append(details)
         short_sha = details["sha"][:7]
         print(f"[{index}/{len(raw_commits)}] Saved {short_sha}: {details['message'].splitlines()[0][:60]}")
 
+    # One JSON file per repo, e.g. data/commits_psf_requests.json.
     os.makedirs("data", exist_ok=True)
-    with open(os.path.join("data", "commits.json"), "w", encoding="utf-8") as f:
+    path = commits_path(repo)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    print(f"Done. Saved {len(results)} commits to data/commits.json")
+    print(f"Done. Saved {len(results)} commits to {path}")
 
 
 if __name__ == "__main__":
