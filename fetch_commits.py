@@ -78,6 +78,39 @@ def get_commit_details(repo, sha):
     }
 
 
+def repo_exists(repo):
+    """True if the repo exists and is public. Returns (ok, message)."""
+    try:
+        get_json(f"{API}/repos/{repo}")
+        return True, ""
+    except requests.HTTPError as error:
+        if error.response.status_code == 404:
+            return False, f"Repo {repo} was not found. Check the name, and note that private repos are not supported."
+        if error.response.status_code in (401, 403):
+            return False, f"No access to {repo}. Only public repos can be read."
+        return False, f"GitHub said {error.response.status_code} for {repo}."
+
+
+def fetch_commits(repo, max_commits=MAX_COMMITS, per_page=PER_PAGE, progress=None):
+    """Fetch commits for a repo and return the cleaned-up commit records.
+
+    progress: optional callback called with (index, total, short_sha, message)
+    so a UI can show what is happening.
+    """
+    raw_commits = list_commits(repo, max_commits, per_page)
+    results = []
+    for index, item in enumerate(raw_commits, start=1):
+        login = (item.get("author") or {}).get("login") or ""
+        if login.endswith("[bot]"):
+            continue
+
+        details = get_commit_details(repo, item["sha"])
+        results.append(details)
+        if progress:
+            progress(index, len(raw_commits), details["sha"][:7], details["message"])
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fetch recent commits from GitHub.")
     parser.add_argument("--repo", help="owner/name (default: REPO from .env, else psf/requests)")

@@ -2,12 +2,37 @@
 
 import os
 import re
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 DEFAULT_REPO = "psf/requests"
+
+
+def parse_repo_input(text):
+    """Turn a GitHub URL or 'owner/name' into 'owner/name'.
+
+    Accepts https://github.com/owner/name, github.com/owner/name, owner/name,
+    and a trailing slash or .git suffix. Returns None if it makes no sense.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+
+    # Take the path part of a full URL.
+    if "://" in cleaned:
+        cleaned = urlparse(cleaned).path
+    cleaned = cleaned.strip("/")
+    if cleaned.lower().startswith("github.com/"):
+        cleaned = cleaned[len("github.com/") :]
+    cleaned = cleaned.removesuffix(".git")
+
+    parts = [part for part in cleaned.split("/") if part]
+    if len(parts) != 2:
+        return None
+    return f"{parts[0]}/{parts[1]}"
 
 
 def get_repo(explicit=None):

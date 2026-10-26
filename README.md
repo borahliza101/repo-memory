@@ -22,7 +22,7 @@ It is like a group chat with two years of messages: the answer is in there somew
 - **Commit timeline.** Every commit in the memory is a dot on a date axis; after an answer, the commits it used light up and the rest fade.
 - **Memory feed.** The sidebar shows the five most recently added commits with "added N minutes ago", refreshing every 30 seconds.
 - **Decision log.** `decisions.py` turns the commit memory into a month-by-month log of design decisions, each with a reason and citations.
-- **Works on any public repo.** Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection.
+- **Works on any public repo.** Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection. You can also add a repo from the app's "Remember a new repo" box in the sidebar, without touching the command line.
 
 ## How it works
 

@@ -142,6 +142,44 @@ def add_chunks(ids, documents, metadatas, name, repo, reset=False):
     return collection
 
 
+def build_repo_memory(repo, commits, progress=None):
+    """Build (or update) the memory for one repo from a list of commits.
+
+    Returns (collection, commit_count). When progress is given it is called
+    with a short message so a UI can show what is happening.
+    """
+    ids, documents, metadatas, skipped = build_entries(commits)
+    kept = len(commits) - skipped
+    if progress:
+        progress(f"Embedding {len(documents)} chunks...")
+
+    name = collection_name(repo)
+    collection = add_chunks(ids, documents, metadatas, name, repo, reset=True)
+    return collection, kept
+
+
+def add_missing_commits(repo, commits, progress=None):
+    """Add only the commits that are not in the memory yet (same as watch.py)."""
+    client = chromadb.PersistentClient(path="chroma_db")
+    name = collection_name(repo)
+    try:
+        collection = client.get_collection(name)
+    except Exception:
+        return build_repo_memory(repo, commits, progress)
+
+    known = {metadata["sha"] for metadata in collection.get(include=["metadatas"])["metadatas"]}
+    missing = [commit for commit in commits if commit["sha"] not in known]
+    if not missing:
+        return collection, len(known)
+
+    for commit in missing:
+        ids, documents, metadatas, _ = build_entries([commit])
+        if progress:
+            progress(f"Adding {commit['sha'][:7]} {commit['message'].splitlines()[0][:50]}")
+        add_chunks(ids, documents, metadatas, name, repo)
+    return collection, len(known) + len(missing)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build the searchable commit memory.")
     parser.add_argument("--repo", help="owner/name (default: REPO from .env, else psf/requests)")
