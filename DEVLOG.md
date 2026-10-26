@@ -62,3 +62,7 @@ Lessons:
 - Summary chunks fixed short-message commits.
 - Good test questions need exactly one right answer.
 - Small embedding models miss vocabulary gaps (idea: let the LLM rewrite the question into technical terms before searching).
+
+## 4:15 PM – Answers
+
+ask.py works end to end with Groq gpt-oss-120b. Tested "Why did they add hasattr checks?": it combined 3 commits from different months (8f6cda9, 6f205ff, 6f66281) into one explanation. I checked its citation against GitHub: the quoted comment in 6f205ff is real. It refuses unrelated questions ("capital of France" -> "I couldn't find this in the history").

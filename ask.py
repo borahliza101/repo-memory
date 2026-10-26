@@ -2,11 +2,14 @@
 
 import os
 import sys
+from functools import lru_cache
 
 import chromadb
 from dotenv import load_dotenv
 from groq import Groq
 from sentence_transformers import SentenceTransformer
+
+load_dotenv()  # read .env once, when this module is imported
 
 MODEL_NAME = "all-MiniLM-L6-v2"  # same embedding model used to build the memory
 LLM_MODEL = "openai/gpt-oss-120b"
@@ -27,13 +30,25 @@ SYSTEM_PROMPT = (
 )
 
 
-def retrieve(question):
+@lru_cache(maxsize=1)
+def get_model():
+    """Load the embedding model once and reuse it afterwards."""
+    return SentenceTransformer(MODEL_NAME)
+
+
+@lru_cache(maxsize=1)
+def get_collection():
+    """Open the stored ChromaDB collection once and reuse it afterwards."""
+    client = chromadb.PersistentClient(path="chroma_db")
+    return client.get_collection("commits")
+
+
+def retrieve(question, model=None, collection=None):
     """Find the top 5 unique commits, each with its best matching chunk."""
-    model = SentenceTransformer(MODEL_NAME)
+    model = model or get_model()
+    collection = collection or get_collection()
     embedding = model.encode([question]).tolist()
 
-    client = chromadb.PersistentClient(path="chroma_db")
-    collection = client.get_collection("commits")
     results = collection.query(
         query_embeddings=embedding,
         n_results=CANDIDATES,
@@ -70,26 +85,17 @@ def build_context(matches):
     return "\n\n---\n\n".join(blocks)
 
 
-def main():
-    # 1. Load the API key from .env. It is never printed.
-    load_dotenv()
+def answer_question(question, matches=None):
+    """Return (answer, matches): the model's answer and the commits it saw."""
+    if matches is None:
+        matches = retrieve(question)
+    if not matches:
+        return "I couldn't find this in the history", matches
+
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise SystemExit("GROQ_API_KEY is missing from .env")
+        raise RuntimeError("GROQ_API_KEY is missing from .env")
 
-    # 2. The question comes from the command line.
-    question = " ".join(sys.argv[1:]).strip()
-    if not question:
-        raise SystemExit('Usage: python ask.py "your question here"')
-
-    # 3. Find the commits that probably contain the answer.
-    print(f"Searching for: {question}")
-    matches = retrieve(question)
-    if not matches:
-        print("I couldn't find this in the history")
-        return
-
-    # 4. Ask the model to answer using only those commits.
     client = Groq(api_key=api_key)
     response = client.chat.completions.create(
         model=LLM_MODEL,
@@ -101,9 +107,23 @@ def main():
             },
         ],
     )
-    answer = response.choices[0].message.content.strip()
+    return response.choices[0].message.content.strip(), matches
 
-    # 5. Show the answer, then the commits it was allowed to use.
+
+def main():
+    # The question comes from the command line.
+    question = " ".join(sys.argv[1:]).strip()
+    if not question:
+        raise SystemExit('Usage: python ask.py "your question here"')
+
+    # Find the commits that probably contain the answer, then ask the model.
+    print(f"Searching for: {question}")
+    try:
+        answer, matches = answer_question(question)
+    except RuntimeError as error:
+        raise SystemExit(str(error))
+
+    # Show the answer, then the commits it was allowed to use.
     print(f"\n{answer}\n")
     print("Commits used:")
     for rank, match in enumerate(matches, start=1):
