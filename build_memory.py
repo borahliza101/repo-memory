@@ -100,11 +100,13 @@ def build_entries(commits):
         documents.append(make_summary(commit))
         metadatas.append(metadata)
 
-        # The full code chunks, so details are searchable as well.
-        for index, chunk in enumerate(split_text(make_document(commit))):
-            ids.append(f"{commit['sha']}-{index}")
-            documents.append(chunk)
-            metadatas.append(metadata)
+        # The full code chunks, so details are searchable as well. An empty
+        # commit has no files, so its code chunk would just repeat the summary.
+        if commit["files"]:
+            for index, chunk in enumerate(split_text(make_document(commit))):
+                ids.append(f"{commit['sha']}-{index}")
+                documents.append(chunk)
+                metadatas.append(metadata)
 
     return ids, documents, metadatas, skipped
 

@@ -1,5 +1,6 @@
 """Streamlit web app for Repo Memory."""
 
+import os
 import re
 from datetime import datetime, timezone
 
@@ -7,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ask import answer_question, format_ist, get_model, open_client, retrieve, to_ist
-from config import get_repo
+from config import decisions_path, get_repo
 
 # Page settings must be set before any other Streamlit output.
 st.set_page_config(page_title="Repo Memory", page_icon="🧠")
@@ -17,18 +18,18 @@ COLOR_OTHER = "rgba(203, 213, 225, 0.6)"  # light grey for the rest
 PREFERRED_REPO = "borahliza101/repo-memory"  # demo default, when it has a memory
 
 
-def linkify(answer, matches, repo):
+def linkify(text, repo, commits):
     """Turn each [shortsha] citation into a link to that commit on GitHub."""
-    full_by_short = {match["metadata"]["sha"][:7]: match["metadata"]["sha"] for match in matches}
+    full_by_short = {commit["sha"][:7]: commit["sha"] for commit in commits}
 
     def replace(match):
         short_sha = match.group(1)
         full_sha = full_by_short.get(short_sha)
         if not full_sha:
-            return match.group(0)  # commit we didn't use: leave the text alone
+            return match.group(0)  # unknown commit: leave the text alone
         return f"[{short_sha}](https://github.com/{repo}/commit/{full_sha})"
 
-    return re.sub(r"\[([0-9a-f]{7})\]", replace, answer)
+    return re.sub(r"\[([0-9a-f]{7})\]", replace, text)
 
 
 @st.cache_resource
@@ -187,24 +188,54 @@ st.write("Ask why a codebase changed.")
 st.markdown(f"**{repo}** · {len(commits)} commits remembered · last updated {last_updated}")
 timeline_slot = st.empty()
 
-question = st.text_input("Question", placeholder="Why did they add hasattr checks?")
-ask_clicked = st.button("Ask")
+tab_ask, tab_decisions = st.tabs(["Ask", "Decisions"])
 
-if ask_clicked:
-    if not question.strip():
-        st.warning("Please type a question first.")
+with tab_ask:
+    question = st.text_input("Question", placeholder="Why did they add hasattr checks?")
+    ask_clicked = st.button("Ask")
+
+    if ask_clicked:
+        if not question.strip():
+            st.warning("Please type a question first.")
+        else:
+            with st.spinner("Searching commits and asking the model..."):
+                matches, rewritten = retrieve(
+                    question, model=model, collection=collection, rewrite=True, repo=repo
+                )
+                answer, matches = answer_question(question, matches, repo=repo)
+
+            st.session_state["answer_repo"] = repo
+            st.session_state["answer"] = answer
+            st.session_state["used"] = [match["metadata"]["sha"] for match in matches]
+            st.session_state["rewritten"] = rewritten
+            st.session_state["matches"] = matches
+
+    if st.session_state.get("answer"):
+        matches = st.session_state.get("matches", [])
+        used_commits = [match["metadata"] for match in matches]
+        # Citations like [6f66281] become links to the commits on GitHub.
+        st.markdown(linkify(st.session_state["answer"], repo, used_commits))
+        if st.session_state.get("rewritten"):
+            st.caption(f"Search query: {st.session_state['rewritten']}")
+
+        # Show the commits the answer is allowed to come from.
+        st.subheader("Commits used")
+        for match in matches:
+            metadata = match["metadata"]
+            short_sha = metadata["sha"][:7]
+            url = f"https://github.com/{repo}/commit/{metadata['sha']}"
+            with st.container(border=True):
+                st.markdown(f"**[{short_sha}]({url})** — {format_ist(metadata['date'])}")
+                st.caption(metadata["author"])
+                st.write(metadata["message"])
+
+with tab_decisions:
+    decision_file = decisions_path(repo)
+    if os.path.exists(decision_file):
+        with open(decision_file, encoding="utf-8") as f:
+            st.markdown(linkify(f.read(), repo, commits))
     else:
-        with st.spinner("Searching commits and asking the model..."):
-            matches, rewritten = retrieve(
-                question, model=model, collection=collection, rewrite=True, repo=repo
-            )
-            answer, matches = answer_question(question, matches, repo=repo)
-
-        st.session_state["answer_repo"] = repo
-        st.session_state["answer"] = answer
-        st.session_state["used"] = [match["metadata"]["sha"] for match in matches]
-        st.session_state["rewritten"] = rewritten
-        st.session_state["matches"] = matches
+        st.info(f"No decision log yet. Run: python decisions.py --repo {repo}")
 
 # Draw the timeline after the click, so the used commits can be highlighted.
 if commits:
@@ -212,21 +243,3 @@ if commits:
     timeline_slot.plotly_chart(
         timeline_figure(commits, used_shas), width="stretch", key="timeline"
     )
-
-if st.session_state.get("answer"):
-    matches = st.session_state.get("matches", [])
-    # Citations like [6f66281] become links to the commits on GitHub.
-    st.markdown(linkify(st.session_state["answer"], matches, repo))
-    if st.session_state.get("rewritten"):
-        st.caption(f"Search query: {st.session_state['rewritten']}")
-
-    # Show the commits the answer is allowed to come from.
-    st.subheader("Commits used")
-    for match in matches:
-        metadata = match["metadata"]
-        short_sha = metadata["sha"][:7]
-        url = f"https://github.com/{repo}/commit/{metadata['sha']}"
-        with st.container(border=True):
-            st.markdown(f"**[{short_sha}]({url})** — {format_ist(metadata['date'])}")
-            st.caption(metadata["author"])
-            st.write(metadata["message"])

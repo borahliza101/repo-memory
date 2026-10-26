@@ -92,3 +92,7 @@ Running the whole pipeline on borahliza101/repo-memory exposed three bugs that p
 - The model sometimes cited commits with full-width brackets (【sha】), which the app's link conversion did not recognise, so those citations came out as plain text. Answers are now normalised to [sha] before links are built.
 
 Testing on a second repo was worth more than another question on the first one: every bug was about an assumption that happened to hold for a big, well-labelled library.
+
+## 6:15 PM – App searched a stale memory
+
+The watcher and the app are separate processes. ChromaDB caches the vector index inside each process, so the app counted 13 commits (that read goes to SQLite) but only searched the 11 that existed when its process started, until a restart. Fixed by clearing Chroma's shared system cache before each query, so a new view of the index is opened every time. Verified with a two-process test: a process that saw 1 record before an external write retrieved that new record after the fix, where before it kept returning the old one.

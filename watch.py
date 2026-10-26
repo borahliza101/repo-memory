@@ -76,6 +76,16 @@ def check_once(repo, state_file, name):
 
     if added:
         print(f"Added {len(added)} new commits: " + ", ".join(added))
+        # Keep the decision log fresh too. Never commit it here: a commit would
+        # create a new commit, which would wake this watcher again.
+        try:
+            from decisions import generate
+
+            path, count = generate(repo)
+            if path:
+                print(f"Updated {path} ({count} decisions)")
+        except Exception as error:
+            print(f"Could not update the decision log: {error}")
     else:
         print("No new commits.")
 

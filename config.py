@@ -34,3 +34,7 @@ def commits_path(repo):
 
 def state_path(repo):
     return os.path.join("data", f"state_{_slug(repo)}.json")
+
+
+def decisions_path(repo):
+    return os.path.join("decisions", f"{_slug(repo)}.md")
