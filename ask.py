@@ -105,21 +105,22 @@ def rewrite_query(question, repo):
     return query or question
 
 
-def retrieve(question, model=None, collection=None, rewrite=False, repo=None, k=RESULTS):
+def retrieve(question, model=None, collection=None, rewrite=False, repo=None, k=RESULTS, rewritten=None):
     """Find the top k unique commits, each with its best matching chunk.
 
     With rewrite=True the question is also asked in technical terms and both
     searches are merged, keeping each commit's best (smallest) distance.
+    Pass rewritten=... to reuse a query the caller already rewrote.
     Returns (matches, rewritten_query), where rewritten_query is None if unused.
     """
     repo = repo or get_repo()
     model = model or get_model()
     collection = collection or open_collection(repo)
 
-    rewritten = None
     queries = [question]
-    if rewrite:
+    if rewritten is None and rewrite:
         rewritten = rewrite_query(question, repo)
+    if rewritten:
         queries.append(rewritten)
 
     # Keep only the best chunk for each commit, so one commit can't fill the list.
@@ -157,6 +158,56 @@ def build_context(matches):
             f"Code and files:\n{match['document']}"
         )
     return "\n\n---\n\n".join(blocks)
+
+
+def stream_answer(question, matches, repo=None):
+    """Yield the answer as the model writes it, so the UI can show it live."""
+    if not matches:
+        yield "I couldn't find this in the history"
+        return
+
+    stream = get_groq_client().chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"Question: {question}\n\nCommits:\n\n{build_context(matches)}",
+            },
+        ],
+        stream=True,
+    )
+    for chunk in stream:
+        piece = chunk.choices[0].delta.content
+        if piece:
+            yield piece
+
+
+def normalize_stream(chunks):
+    """Clean 【sha】 citations as chunks arrive, holding back split brackets.
+
+    A citation can be split across chunks, so anything from an unclosed 【 to
+    the end is held back until the closing 】 arrives (or the stream ends).
+    """
+    accumulated = ""
+    written = 0
+    for piece in chunks:
+        accumulated += piece
+
+        # Only convert text that cannot be the start of a half-received citation.
+        safe = accumulated
+        opening = safe.rfind("【")
+        if opening != -1 and "】" not in safe[opening:]:
+            safe = safe[:opening]
+
+        text = normalize_citations(safe)
+        if len(text) > written:
+            yield text[written:]
+            written = len(text)
+
+    text = normalize_citations(accumulated)
+    if len(text) > written:
+        yield text[written:]
 
 
 def answer_question(question, matches=None, repo=None):
