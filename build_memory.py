@@ -11,18 +11,24 @@ CHUNK_OVERLAP = 200
 MODEL_NAME = "all-MiniLM-L6-v2"
 
 
-def make_document(commit):
-    """Turn one commit into a single text document."""
+def make_summary(commit):
+    """Short text with only the purpose (message + filenames), no code."""
     short_sha = commit["sha"][:7]
     filenames = ", ".join(f["filename"] for f in commit["files"])
-    patches = "\n".join(f["patch"] for f in commit["files"])
 
     return (
         f"Commit {short_sha} by {commit['author']} on {commit['date']}\n\n"
         f"Message: {commit['message']}\n\n"
-        f"Files changed: {filenames}\n\n"
-        f"Changes: {patches}"
+        f"Files changed: {filenames}"
     )
+
+
+def make_document(commit):
+    """Turn one commit into a single text document, including the code changes."""
+    filenames = ", ".join(f["filename"] for f in commit["files"])
+    patches = "\n".join(f["patch"] for f in commit["files"])
+
+    return f"{make_summary(commit)}\n\nChanges: {patches}"
 
 
 def split_text(text):
@@ -47,12 +53,17 @@ def main():
         commits = json.load(f)
     print(f"Loaded {len(commits)} commits")
 
-    # 2. Build one text document per commit, then split it into chunks.
+    # 2. Build text documents for each commit, then split them into chunks.
     ids = []
     documents = []
     metadatas = []
+    skipped = 0
     for commit in commits:
-        text = make_document(commit)
+        # Skip bot merges too: their author looks human, but the message names dependabot.
+        if "dependabot" in commit["message"].lower():
+            skipped += 1
+            continue
+
         first_line = commit["message"].splitlines()[0] if commit["message"] else ""
         metadata = {
             "sha": commit["sha"],
@@ -60,12 +71,20 @@ def main():
             "date": commit["date"],
             "message": first_line,
         }
-        for index, chunk in enumerate(split_text(text)):
+
+        # A short summary chunk, so the commit's purpose is easy to find.
+        ids.append(f"{commit['sha']}-summary")
+        documents.append(make_summary(commit))
+        metadatas.append(metadata)
+
+        # The full code chunks, so details are searchable as well.
+        for index, chunk in enumerate(split_text(make_document(commit))):
             ids.append(f"{commit['sha']}-{index}")
             documents.append(chunk)
             metadatas.append(metadata)
 
-    print(f"Built {len(documents)} chunks")
+    print(f"Skipped {skipped} bot commits")
+    print(f"Built {len(documents)} chunks from {len(commits) - skipped} commits")
 
     # 3. Embed every chunk locally. The model downloads once, then works offline.
     print(f"Loading embedding model {MODEL_NAME}...")
@@ -93,7 +112,9 @@ def main():
             metadatas=metadatas[start:end],
         )
 
-    print(f"Stored {len(commits)} commits and {collection.count()} chunks in chroma_db/")
+    print(
+        f"Stored {len(commits) - skipped} commits and {collection.count()} chunks in chroma_db/"
+    )
 
 
 if __name__ == "__main__":
