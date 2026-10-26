@@ -66,3 +66,19 @@ Lessons:
 ## 4:15 PM – Answers
 
 ask.py works end to end with Groq gpt-oss-120b. Tested "Why did they add hasattr checks?": it combined 3 commits from different months (8f6cda9, 6f205ff, 6f66281) into one explanation. I checked its citation against GitHub: the quoted comment in 6f205ff is real. It refuses unrelated questions ("capital of France" -> "I couldn't find this in the history").
+
+## 4:30 PM – Fair test
+
+Caught data leakage: my first rewrite prompt used my own test question as its example, so the improvement on fd62809 wasn't a fair test. Replaced the example and re-measured.
+
+| Question | No rewrite | With rewrite | Rewritten query |
+| --- | --- | --- | --- |
+| 3.15 support | miss | miss | Python 3.12 support added |
+| typo fixes | hit | hit | spellcheck integration, typo detection |
+| proxy vars in tests | hit | hit | test suite failures due to network configuration and proxy settings |
+| leading slashes | miss | miss | url scheme normalization bug |
+| broken link | miss | miss | docs broken link fix |
+
+**Score: 2/5 without rewrite, 2/5 with rewrite.**
+
+Set temperature=0 so this is repeatable. An earlier run at the default temperature scored 3/5 by finding fd62809 at rank 2, but that result does not reproduce at temperature=0, so the gain was sampling luck rather than a real improvement.
