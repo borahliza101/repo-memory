@@ -96,3 +96,15 @@ Testing on a second repo was worth more than another question on the first one: 
 ## 6:15 PM – App searched a stale memory
 
 The watcher and the app are separate processes. ChromaDB caches the vector index inside each process, so the app counted 13 commits (that read goes to SQLite) but only searched the 11 that existed when its process started, until a restart. Fixed by clearing Chroma's shared system cache before each query, so a new view of the index is opened every time. Verified with a two-process test: a process that saw 1 record before an external write retrieved that new record after the fix, where before it kept returning the old one.
+
+## 7:00 PM – MCP server for coding agents
+
+Made the memory usable from any coding agent: `mcp_server.py` speaks the Model Context Protocol over stdio with the official Python SDK and exposes three tools, `ask_repo_history`, `search_commits` and `get_decision_log`. The tools call the existing `ask.py` and `decisions.py` functions instead of copying them, so the CLI, the web app and the MCP server can never drift apart.
+
+Three things worth remembering:
+
+- A stdio server must never print to stdout, because stdout carries the protocol. The tools print nothing, and the server quiets the model download logs.
+- The embedding model is loaded once when the server starts, so the first tool call is not slow.
+- The SDK renamed `FastMCP` to `MCPServer` in version 2, so the project pins `mcp<2`.
+
+`test_mcp.py` starts the server as a subprocess, lists the tools, and calls `ask_repo_history("When did I test watch mode?")`, which returns the answer plus the five commits it used. Connecting it: in Alan, **Settings → Account → Plugins → MCP → Add custom connector**, connector type **Command**, with the venv Python and `mcp_server.py` as the single argument; in Claude Code, `claude mcp add repo-memory -- "<python path>" "<script path>"`. Both need a path that exists wherever the agent runs, which is why a cloud sandbox wants an HTTPS connector instead.

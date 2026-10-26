@@ -105,8 +105,8 @@ def rewrite_query(question, repo):
     return query or question
 
 
-def retrieve(question, model=None, collection=None, rewrite=False, repo=None):
-    """Find the top 5 unique commits, each with its best matching chunk.
+def retrieve(question, model=None, collection=None, rewrite=False, repo=None, k=RESULTS):
+    """Find the top k unique commits, each with its best matching chunk.
 
     With rewrite=True the question is also asked in technical terms and both
     searches are merged, keeping each commit's best (smallest) distance.
@@ -143,7 +143,7 @@ def retrieve(question, model=None, collection=None, rewrite=False, repo=None):
                 }
 
     matches = sorted(best_per_commit.values(), key=lambda item: item["distance"])
-    return matches[:RESULTS], rewritten
+    return matches[:k], rewritten
 
 
 def build_context(matches):
