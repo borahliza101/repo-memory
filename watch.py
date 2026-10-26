@@ -6,6 +6,7 @@ import os
 import time
 
 import chromadb
+from chromadb.api.shared_system_client import SharedSystemClient
 
 from build_memory import add_chunks, build_entries, is_dependabot_merge
 from config import collection_name, get_repo, state_path
@@ -35,6 +36,8 @@ def recent_commits(repo):
 
 def stored_shas(name):
     """Every commit sha already in this repo's collection."""
+    # Drop Chroma's in-process cache, so writes from other processes are visible.
+    SharedSystemClient.clear_system_cache()
     client = chromadb.PersistentClient(path="chroma_db")
     try:
         collection = client.get_collection(name)

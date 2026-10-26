@@ -3,11 +3,10 @@
 import re
 from datetime import datetime, timezone
 
-import chromadb
 import plotly.graph_objects as go
 import streamlit as st
 
-from ask import answer_question, format_ist, get_model, retrieve, to_ist
+from ask import answer_question, format_ist, get_model, open_client, retrieve, to_ist
 from config import get_repo
 
 # Page settings must be set before any other Streamlit output.
@@ -33,11 +32,9 @@ def linkify(answer, matches, repo):
 
 
 @st.cache_resource
-def load_resources():
-    """Load the embedding model and the database only once per server run."""
-    model = get_model()
-    client = chromadb.PersistentClient(path="chroma_db")
-    return model, client
+def load_model():
+    """The embedding model is expensive, so load it once per server run."""
+    return get_model()
 
 
 def known_repos(client):
@@ -62,6 +59,16 @@ def timeline_figure(commits, used_shas):
     used = set(used_shas)
     is_used = [commit["sha"] in used for commit in commits]
 
+    # Alternate the sha labels above and below the dots, so neighbours don't overlap.
+    positions = []
+    label_index = 0
+    for flag in is_used:
+        if flag:
+            positions.append("top center" if label_index % 2 == 0 else "bottom center")
+            label_index += 1
+        else:
+            positions.append("top center")
+
     figure = go.Figure(
         go.Scatter(
             x=[to_ist(commit["date"]).replace(tzinfo=None) for commit in commits],
@@ -73,7 +80,7 @@ def timeline_figure(commits, used_shas):
                 "line": {"width": 0},
             },
             text=[commit["sha"][:7] if flag else "" for commit, flag in zip(commits, is_used)],
-            textposition="top center",
+            textposition=positions,
             textfont={"size": 11, "color": "#e2e8f0"},
             cliponaxis=False,  # keep sha labels visible above the dots
             hovertext=[
@@ -135,7 +142,9 @@ def memory_feed(collection):
         st.caption(time_ago(metadata.get("added_at")))
 
 
-model, client = load_resources()
+model = load_model()
+# A fresh client on every run, so commits added by watch.py show up without a restart.
+client = open_client()
 repos = known_repos(client)
 
 # Sidebar: pick the repo, then show what is stored for it.

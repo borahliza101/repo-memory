@@ -9,6 +9,7 @@ from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import chromadb
+from chromadb.api.shared_system_client import SharedSystemClient
 from dotenv import load_dotenv
 from groq import Groq
 from sentence_transformers import SentenceTransformer
@@ -52,11 +53,20 @@ def get_model():
     return SentenceTransformer(MODEL_NAME)
 
 
-@lru_cache(maxsize=None)
-def get_collection(repo):
-    """Open this repo's ChromaDB collection once and reuse it afterwards."""
-    client = chromadb.PersistentClient(path="chroma_db")
-    return client.get_collection(collection_name(repo))
+def open_client():
+    """Open a ChromaDB client that sees commits added by other processes.
+
+    Chroma keeps its vector index cached inside a process, so a long-running
+    app would never see commits that watch.py added until it was restarted.
+    Clearing the system cache makes every new query read the current database.
+    """
+    SharedSystemClient.clear_system_cache()
+    return chromadb.PersistentClient(path="chroma_db")
+
+
+def open_collection(repo):
+    """Open this repo's collection with a fresh view of the database."""
+    return open_client().get_collection(collection_name(repo))
 
 
 def to_ist(iso_text):
@@ -104,7 +114,7 @@ def retrieve(question, model=None, collection=None, rewrite=False, repo=None):
     """
     repo = repo or get_repo()
     model = model or get_model()
-    collection = collection or get_collection(repo)
+    collection = collection or open_collection(repo)
 
     rewritten = None
     queries = [question]
