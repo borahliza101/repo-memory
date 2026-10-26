@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from datetime import datetime, timezone
 from functools import lru_cache
 
 import chromadb
@@ -90,6 +91,8 @@ def build_entries(commits):
             "author": commit["author"],
             "date": commit["date"],
             "message": first_line,
+            # When this commit entered the memory, for the app's memory feed.
+            "added_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
 
         # A short summary chunk, so the commit's purpose is easy to find.

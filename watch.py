@@ -5,6 +5,8 @@ import json
 import os
 import time
 
+import chromadb
+
 from build_memory import add_chunks, build_entries, is_dependabot_merge
 from config import collection_name, get_repo, state_path
 from fetch_commits import API, get_commit_details, get_json
@@ -50,20 +52,41 @@ def new_commits_since(repo, last_sha):
     return list(reversed(found))
 
 
+def newest_stored_sha(name):
+    """The newest commit already in the memory, or None if the memory is empty."""
+    client = chromadb.PersistentClient(path="chroma_db")
+    try:
+        collection = client.get_collection(name)
+    except Exception:
+        return None  # no memory for this repo yet
+    metadatas = collection.get(include=["metadatas"])["metadatas"]
+    if not metadatas:
+        return None
+    return max(metadatas, key=lambda metadata: metadata["date"])["sha"]
+
+
 def check_once(repo, state_file, name):
     """Look for new commits and add them to this repo's collection."""
     last_sha = read_last_sha(state_file)
 
     if last_sha is None:
-        # First run: just remember the newest commit, then start from there.
-        newest = get_json(f"{API}/repos/{repo}/commits?per_page=1")
-        if not newest:
-            print("Repo has no commits yet.")
+        # First run: resume from the newest commit we already stored, so commits
+        # made between the last build and now are not missed.
+        last_sha = newest_stored_sha(name)
+        if last_sha is None:
+            # Nothing in memory: just remember GitHub's newest commit.
+            newest = get_json(f"{API}/repos/{repo}/commits?per_page=1")
+            if not newest:
+                print("Repo has no commits yet.")
+                return
+            save_last_sha(state_file, newest[0]["sha"])
+            print(
+                f"First run: memory is empty, starting from {newest[0]['sha'][:7]}. "
+                "Run build_memory.py to fill it."
+            )
             return
-        sha = newest[0]["sha"]
-        save_last_sha(state_file, sha)
-        print(f"First run: starting from {sha[:7]}. Run build_memory.py if the memory is empty.")
-        return
+        save_last_sha(state_file, last_sha)
+        print(f"First run: starting from stored commit {last_sha[:7]}.")
 
     commits = new_commits_since(repo, last_sha)
     added = []
