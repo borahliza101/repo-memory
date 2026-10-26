@@ -1,0 +1,9 @@
+requests
+python-dotenv
+sentence-transformers
+chromadb
+streamlit
+plotly
+groq
+mcp<2
+pytest
