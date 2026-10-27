@@ -3,9 +3,10 @@
 import json
 import os
 
-from .chunking import is_dependabot_merge
+from .chunking import is_dependabot_merge, make_summary
 from .config import collection_name, state_path
 from .github_client import get_commit_details, recent_commits
+from .llm import RATE_LIMIT_MESSAGE, is_rate_limited
 from .store import add_chunks, build_entries, stored_shas
 
 RECENT_COMMITS = 100  # how many recent commits we compare against the memory
@@ -43,6 +44,7 @@ def check_once(repo, state_file=None, name=None):
     missing = [item for item in commits if item["sha"] not in known and not is_bot(item)]
 
     added = []
+    added_summaries = []
     # Oldest first, so the newest commit is added last (and tops the feed).
     for item in reversed(missing):
         details = get_commit_details(repo, item["sha"])
@@ -50,20 +52,27 @@ def check_once(repo, state_file=None, name=None):
         ids, documents, metadatas, _ = build_entries([details])
         add_chunks(ids, documents, metadatas, name, repo)
         added.append(f"{details['sha'][:7]} {details['message'].splitlines()[0]}")
+        # Keep the lightweight text for the decision log.
+        added_summaries.append(
+            {"sha": details["sha"], "date": details["date"], "text": make_summary(details)}
+        )
 
     save_last_sha(state_file, commits[0]["sha"])
 
     if added:
         print(f"Added {len(added)} new commits: " + ", ".join(added))
-        # Keep the decision log fresh too. Never commit it here: a commit would
-        # create a new commit, which would wake this watcher again.
+        # Update the decision log with only the new commits. Never commit here:
+        # a commit would create a new commit, which would wake this watcher again.
         try:
-            from .decisions import generate
+            from .decisions import generate_incremental
 
-            path, count = generate(repo)
+            path, count = generate_incremental(repo, added_summaries, len(known) + len(missing))
             if path:
-                print(f"Updated {path} ({count} decisions)")
+                print(f"Updated {path} (+{count} decisions)")
         except Exception as error:
-            print(f"Could not update the decision log: {error}")
+            if is_rate_limited(error):
+                print(f"Skipped the decision log: {RATE_LIMIT_MESSAGE}.")
+            else:
+                print(f"Could not update the decision log: {error}")
     else:
         print("No new commits.")

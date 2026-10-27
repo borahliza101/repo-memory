@@ -120,7 +120,11 @@ Create a `.env` file:
 GITHUB_TOKEN=ghp_your_token
 GROQ_API_KEY=gsk_your_key
 REPO=psf/requests                  # optional default
+ANSWER_MODEL=openai/gpt-oss-120b   # optional: writes the final answer
+LIGHT_MODEL=openai/gpt-oss-20b     # optional: query rewriting + decision log
 ```
+
+Groq's free tier shares one token budget, so the cheap model does the background work (rewriting questions, reading commits for the decision log) and the big model is only used for the answer you read. Groq retired llama-3.1-8b-instant, so the default light model is openai/gpt-oss-20b; set LIGHT_MODEL to any small model your account can use. If the budget runs out, the app says "The AI is at its usage limit, try again in a minute" and the watcher keeps adding commits while skipping the decision log for that round.
 
 Then:
 

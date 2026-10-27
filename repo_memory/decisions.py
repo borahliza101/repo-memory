@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from .config import decisions_path
-from .llm import LLM_MODEL, get_groq_client
+from .llm import LIGHT_MODEL, get_groq_client
 from .store import open_collection
 from .timefmt import IST
 
@@ -78,7 +78,7 @@ def extract_decisions(summaries):
         batch = summaries[start : start + BATCH_SIZE]
         commits = "\n\n".join(summary["text"] for summary in batch)
         response = client.chat.completions.create(
-            model=LLM_MODEL,
+            model=LIGHT_MODEL,
             messages=[
                 {"role": "system", "content": EXTRACT_PROMPT},
                 {"role": "user", "content": f"Commits:\n\n{commits}"},
@@ -91,6 +91,24 @@ def extract_decisions(summaries):
             if decision:
                 decisions.append(decision)
     return decisions
+
+
+DECISION_LINE = re.compile(
+    r"^- \*\*(?P<title>.+?)\*\* — (?P<why>.+?) "
+    r"\(\[(?P<sha>[0-9a-f]{7})\], (?P<date>\d{4}-\d{2}-\d{2})\)$"
+)
+
+
+def parse_log(markdown):
+    """Read our own log back into decision dicts, so updates can merge into it."""
+    rows = []
+    for line in markdown.splitlines():
+        match = DECISION_LINE.match(line.strip())
+        if match:
+            row = match.groupdict()
+            row["sort"] = row["date"]
+            rows.append(row)
+    return rows
 
 
 def render_log(repo, decisions, commit_count):
@@ -125,16 +143,8 @@ def render_log(repo, decisions, commit_count):
     return "\n".join(lines).rstrip() + "\n"
 
 
-def generate(repo):
-    """Build the decision log for one repo and save it. Returns (path, count)."""
-    summaries = load_summaries(repo)
-    if not summaries:
-        print(f"No commits in memory for {repo}. Run build_memory.py first.")
-        return None, 0
-
-    decisions = extract_decisions(summaries)
-
-    # Trust the stored commit date, not the model's: it is the real timestamp.
+def _tidy(decisions, summaries):
+    """Use the stored commit date, and be honest when a why repeats the title."""
     date_by_sha = {summary["sha"][:7]: summary["date"] for summary in summaries}
     for decision in decisions:
         stored_date = date_by_sha.get(decision["sha"])
@@ -145,11 +155,51 @@ def generate(repo):
         if not adds_detail(decision["why"], decision["title"]):
             decision["why"] = "no reason given in the commit"
     decisions.sort(key=lambda item: item["sort"], reverse=True)
+    return decisions
 
-    markdown = render_log(repo, decisions, len(summaries))
+
+def write_log(repo, decisions, commit_count):
+    """Render the log and save it. Returns the path."""
+    markdown = render_log(repo, decisions, commit_count)
 
     path = decisions_path(repo)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(markdown)
-    return path, len(decisions)
+    return path
+
+
+def generate(repo):
+    """Build the whole decision log for one repo. Returns (path, count)."""
+    summaries = load_summaries(repo)
+    if not summaries:
+        print(f"No commits in memory for {repo}. Run build_memory.py first.")
+        return None, 0
+
+    decisions = _tidy(extract_decisions(summaries), summaries)
+    return write_log(repo, decisions, len(summaries)), len(decisions)
+
+
+def generate_incremental(repo, new_summaries, commit_count):
+    """Add decisions for new commits to the existing log.
+
+    Only the new commits go to the model, so a watcher update costs a fraction
+    of a full rebuild. Existing decisions are read back from the markdown file.
+    Returns (path, added_count).
+    """
+    if not new_summaries:
+        return None, 0
+
+    new_decisions = _tidy(extract_decisions(new_summaries), new_summaries)
+
+    path = decisions_path(repo)
+    existing = []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            existing = parse_log(f.read())
+
+    merged = {decision["sha"]: decision for decision in existing}
+    merged.update({decision["sha"]: decision for decision in new_decisions})
+    ordered = sorted(merged.values(), key=lambda item: item.get("sort", item["date"]), reverse=True)
+
+    return write_log(repo, ordered, commit_count), len(new_decisions)

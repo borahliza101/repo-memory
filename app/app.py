@@ -17,7 +17,14 @@ from repo_memory.config import (
     parse_repo_input,
 )
 from repo_memory.github_client import fetch_commits, repo_exists
-from repo_memory.llm import normalize_citations, normalize_stream, rewrite_query, stream_answer
+from repo_memory.llm import (
+    RATE_LIMIT_MESSAGE,
+    is_rate_limited,
+    normalize_citations,
+    normalize_stream,
+    rewrite_query,
+    stream_answer,
+)
 from repo_memory.retrieval import retrieve
 from repo_memory.store import (
     add_missing_commits,
@@ -504,36 +511,41 @@ with tab_ask:
         if not question.strip():
             st.warning("Please type a question first.")
         else:
-            # Live progress, one step at a time.
+            # Live progress, one step at a time. The whole sequence is guarded,
+            # because rewriting the question also uses the token budget.
             status = st.status("Rewriting your question...", expanded=True)
-            rewritten = rewrite_query(question, repo)
-            status.write(f"**Rewritten query:** {rewritten}")
-
-            status.update(label="Searching commits...")
-            status.write(f"Searching {len(commits)} commits...")
-            matches, _ = retrieve(
-                question,
-                model=model,
-                collection=collection,
-                repo=repo,
-                rewritten=rewritten,
-            )
-
-            status.update(label="Reading the best commits...")
-            status.write(f"Reading {len(matches)} commits...")
-
-            status.update(label="Writing the answer...")
-            answer_slot = st.empty()
+            answer = None
             try:
+                rewritten = rewrite_query(question, repo)
+                status.write(f"**Rewritten query:** {rewritten}")
+
+                status.update(label="Searching commits...")
+                status.write(f"Searching {len(commits)} commits...")
+                matches, _ = retrieve(
+                    question,
+                    model=model,
+                    collection=collection,
+                    repo=repo,
+                    rewritten=rewritten,
+                )
+
+                status.update(label="Reading the best commits...")
+                status.write(f"Reading {len(matches)} commits...")
+
+                status.update(label="Writing the answer...")
+                answer_slot = st.empty()
                 with answer_slot.container():
                     streamed = st.write_stream(
                         normalize_stream(stream_answer(question, matches, repo))
                     )
                 answer = normalize_citations(streamed)
-            except Exception as error:  # network or API problem
-                status.update(label="Something went wrong", state="error")
-                st.error(f"Could not get an answer: {error}")
-                answer = None
+            except Exception as error:  # network, API or usage problem
+                if is_rate_limited(error):
+                    status.update(label="AI usage limit reached", state="error")
+                    st.warning(RATE_LIMIT_MESSAGE)
+                else:
+                    status.update(label="Something went wrong", state="error")
+                    st.error(f"Could not get an answer: {error}")
 
             if answer:
                 status.update(label="Answer ready", state="complete", expanded=False)

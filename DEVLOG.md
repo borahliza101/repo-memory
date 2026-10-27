@@ -120,3 +120,13 @@ Three bugs came out of that feedback, all of which only a fresh install would sh
 - The form was hidden behind an early stop when no memory existed, which is exactly the case a new user is in. Now nothing stops before the form: a fresh install shows a welcome, the URL form and a psf/requests suggestion, and the selector, timeline, feed and Ask tab stay hidden until a memory exists.
 
 Also tightened the answer prompt so the model does not add background knowledge that is not in the commits, and made sure citations written as [ f140c94 ] or 【f140c94】 are turned into [f140c94] before they are turned into links.
+
+## 9:15 PM – Staying inside the token budget
+
+Groq's free tier counts every token against one daily budget, and by the end of the day my own testing had eaten it: the app answered with an HTTP 429 instead of an answer, which is a bad look in a demo. Three changes to bring the cost down:
+
+- Two models, both configurable in `.env`. `ANSWER_MODEL` (default `openai/gpt-oss-120b`) is only used to write the final answer, because that is the one place quality is visible. `LIGHT_MODEL` does query rewriting and the decision log, where a small model is plenty. I first pointed it at `llama-3.1-8b-instant`, but Groq has retired that model (a 404, not a rate limit), so the default is `openai/gpt-oss-20b`. Rewriting a question was previously as expensive as answering it.
+- The decision log is now incremental. The watcher used to send the whole history to the model every time a commit arrived; it now sends only the new commits and merges the results into the existing markdown, reading the old entries back out of the file. On a repo with 200 commits that turns a 5-call rebuild into a 1-call update.
+- A 429 is no longer an error in the UI. The app says "The AI is at its usage limit, try again in a minute" instead of a stack-trace message, and the watcher keeps adding commits to the memory while skipping the decision log for that round.
+
+Also removed a leftover unused variable in the chunker while I was in there.

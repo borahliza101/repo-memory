@@ -11,7 +11,7 @@ from chromadb.errors import NotFoundError
 from mcp.server.fastmcp import FastMCP
 
 from repo_memory.config import decisions_path
-from repo_memory.llm import answer_question
+from repo_memory.llm import RATE_LIMIT_MESSAGE, answer_question, is_rate_limited
 from repo_memory.retrieval import retrieve
 from repo_memory.store import get_model
 from repo_memory.timefmt import format_ist
@@ -69,7 +69,12 @@ def ask_repo_history(question: str, repo: str = DEFAULT_REPO) -> dict:
     except NotFoundError:
         return _missing_memory(repo)
 
-    answer = answer_question(question, matches, repo=repo)
+    try:
+        answer = answer_question(question, matches, repo=repo)
+    except Exception as error:
+        if is_rate_limited(error):
+            return {"error": RATE_LIMIT_MESSAGE, "hint": "Try again in a minute."}
+        raise
     return {
         "repo": repo,
         "answer": answer,

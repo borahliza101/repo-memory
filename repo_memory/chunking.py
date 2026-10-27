@@ -20,7 +20,6 @@ def make_summary(commit):
 
 def make_document(commit):
     """Turn one commit into a single text document, including the code changes."""
-    filenames = ", ".join(f["filename"] for f in commit["files"])
     patches = "\n".join(f["patch"] for f in commit["files"])
 
     return f"{make_summary(commit)}\n\nChanges: {patches}"

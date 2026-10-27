@@ -4,13 +4,20 @@ import os
 import re
 
 from dotenv import load_dotenv
-from groq import Groq
+from groq import Groq, RateLimitError
 
 from .timefmt import format_ist
 
 load_dotenv()
 
-LLM_MODEL = "openai/gpt-oss-120b"
+# Two models, because they are paid for with the same token budget:
+# the big one writes the answer, the small one does the cheap background work.
+# Groq retired llama-3.1-8b-instant, so the cheap default is gpt-oss-20b;
+# set LIGHT_MODEL to any small model your account can use.
+ANSWER_MODEL = os.getenv("ANSWER_MODEL", "openai/gpt-oss-120b")
+LIGHT_MODEL = os.getenv("LIGHT_MODEL", "openai/gpt-oss-20b")
+
+RATE_LIMIT_MESSAGE = "The AI is at its usage limit, try again in a minute"
 
 SYSTEM_PROMPT = (
     "You answer questions about a software project's commit history. "
@@ -43,10 +50,15 @@ def get_groq_client():
     return Groq(api_key=api_key)
 
 
+def is_rate_limited(error):
+    """True when Groq refused the call because the token budget ran out (HTTP 429)."""
+    return isinstance(error, RateLimitError) or getattr(error, "status_code", None) == 429
+
+
 def rewrite_query(question, repo):
     """Turn a user's wording into the technical words used in commit messages."""
     response = get_groq_client().chat.completions.create(
-        model=LLM_MODEL,
+        model=LIGHT_MODEL,
         messages=[
             {"role": "system", "content": REWRITE_PROMPT.format(repo=repo)},
             {"role": "user", "content": question},
@@ -89,7 +101,7 @@ def stream_answer(question, matches, repo=None):
         return
 
     stream = get_groq_client().chat.completions.create(
-        model=LLM_MODEL, messages=_messages(question, matches), stream=True
+        model=ANSWER_MODEL, messages=_messages(question, matches), stream=True
     )
     for chunk in stream:
         piece = chunk.choices[0].delta.content
@@ -103,7 +115,7 @@ def answer_question(question, matches, repo=None):
         return "I couldn't find this in the history"
 
     response = get_groq_client().chat.completions.create(
-        model=LLM_MODEL, messages=_messages(question, matches)
+        model=ANSWER_MODEL, messages=_messages(question, matches)
     )
     return normalize_citations(response.choices[0].message.content.strip())
 
