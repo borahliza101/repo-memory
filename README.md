@@ -21,7 +21,7 @@ It is like a group chat with two years of messages: the answer is in there somew
 - **Watch mode.** `watch.py` polls GitHub, compares the last 100 commits with the memory, and adds the missing ones live, without rebuilding.
 - **Commit timeline.** Every commit in the memory is a dot on a date axis; after an answer, the commits it used light up and the rest fade.
 - **Memory feed.** The sidebar shows the five most recently added commits with "added N minutes ago", refreshing every 30 seconds.
-- **Decision log.** `decisions.py` turns the commit memory into a month-by-month log of design decisions, each with a reason and citations.
+- **Decision log.** `decisions.py` turns the commit memory into a month-by-month log of design decisions, each with a reason and citations. The watcher adds entries for new commits only, so an update costs one small model call instead of a full rebuild.
 - **Works on any public repo.** Every script takes `--repo owner/name`, and each repo gets its own ChromaDB collection.
 - **Remember a new repo from the UI.** Paste a GitHub URL in the sidebar, pick how many recent commits to read, and press "Build memory". The repo is fetched, embedded and added to the dropdown. If it is already in memory the button says "Update" and only adds the commits you are missing. On a fresh install the same form is the welcome screen, so there is no command line needed to get started.
 
@@ -33,11 +33,14 @@ flowchart LR
     F --> S["summary chunk<br/>+ code chunks"]
     S --> M["all-MiniLM-L6-v2<br/>embeddings"]
     M --> DB[(ChromaDB)]
-    DB --> R["retrieve 20 chunks<br/>best chunk per commit, top 5"]
-    R --> G["Groq<br/>gpt-oss-120b"]
+    U([Your question]) --> RQ["rewrite question<br/>gpt-oss-20b"]
+    RQ --> R["retrieve 20 chunks<br/>best chunk per commit, top 5"]
+    U --> R
+    DB --> R
+    R --> G["Groq gpt-oss-120b<br/>final answer only"]
     G --> A["cited answer<br/>[shortsha]"]
     W["watch.py<br/>every N seconds"] --> DB
-    DB --> D["decisions.py<br/>batches of 40 commits"]
+    DB --> D["decisions.py<br/>gpt-oss-20b, new commits only"]
     D --> L["decision log<br/>decisions/owner_name.md"]
 ```
 
@@ -99,20 +102,25 @@ watch.py
 
 `app.py` in the project root is only a two-line entry point, so `streamlit run app.py` still works; `streamlit run app/app.py` works too. The CLI scripts are thin wrappers over the package, so the command line, the web app and the MCP server all run the same code.
 
-Run the tests:
+## Tests
+
+The suite covers the pure logic with no network and no real model: repo parsing, chunking and overlap, the bot filter, citation cleanup, retrieval merging, decision parsing/merging, and the watcher's rate-limit behaviour.
 
 ```bash
 python -m unittest discover -s tests -v
-python test_mcp.py
 ```
+
+24 unit tests. `python test_mcp.py` is a separate end-to-end check of the MCP server; it does call Groq, so it needs a working `GROQ_API_KEY`.
 
 ## How to run it
 
 ```bash
-uv venv
+uv venv --python 3.12
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-uv pip install requests python-dotenv chromadb sentence-transformers groq plotly streamlit "mcp<2"
+uv pip install -r requirements.txt
 ```
+
+Use Python 3.12: some dependencies (torch / sentence-transformers) do not support Python 3.14 yet.
 
 Create a `.env` file:
 
@@ -140,7 +148,7 @@ streamlit run app.py
 
 The command line is optional: `streamlit run app.py` alone gives you a welcome screen with a box where you paste a public GitHub URL, and the app fetches, embeds and remembers that repo for you.
 
-`data/` and `chroma_db/` are generated and gitignored. `decisions/` is a normal file you can commit yourself; the watcher regenerates it but never commits it.
+`data/` and `chroma_db/` are generated and gitignored. `decisions/` is a normal file you can commit yourself; the watcher adds entries for new commits but never commits the file.
 
 ## Use it from coding agents (MCP)
 
@@ -162,7 +170,30 @@ python test_mcp.py
 
 That starts the server as a subprocess, lists the tools, and calls `ask_repo_history("When did I test watch mode?")` end to end.
 
-**Claude Code (Windows)**
+**Alan desktop app (Windows)** — the client I tested
+
+The paths below are examples; replace `C:\Users\liza\repo-memory` with your own project folder.
+
+1. Open **Settings → Account → Plugins** (or **Settings → your team → Plugins**), then the **MCP** tab.
+2. Click **Add custom connector**.
+3. Set **Connector type** to **Command**.
+4. **Name**: `repo-memory`, **Display name**: `Repo Memory`.
+5. **Command**: `cmd` — Alan rejects a full path in this field, so `cmd` starts Windows' command shell.
+6. **Arguments** (one per line, in this order):
+   ```
+   /c
+   C:\Users\liza\repo-memory\.venv\Scripts\python.exe
+   C:\Users\liza\repo-memory\mcp_server.py
+   ```
+7. Save. The connector is now available to your agents.
+
+The final two arguments are the full paths to your venv Python and to `mcp_server.py`, so the server starts exactly like `cmd /c "<python>" "<mcp_server.py>"`.
+
+Alan starts this program inside each agent run, on your computer or in the cloud sandbox, so the paths above must exist wherever the agent runs. For a cloud sandbox, expose the server over HTTPS instead and use the **URL** connector type.
+
+**Claude Code and `.mcp.json`** — should also work, not tested
+
+I have only tested the server with Alan. The Claude Code command and the `.mcp.json` block below follow the standard MCP client format and should work, but they are untested. Replace `C:\Users\liza\repo-memory` with your own project folder.
 
 ```bash
 claude mcp add repo-memory -- "C:\Users\liza\repo-memory\.venv\Scripts\python.exe" "C:\Users\liza\repo-memory\mcp_server.py"
@@ -181,18 +212,6 @@ Or add it to `.mcp.json` in the project (backslashes must be doubled in JSON):
 }
 ```
 
-**Alan desktop app (Windows)**
-
-1. Open **Settings → Account → Plugins** (or **Settings → your team → Plugins**), then the **MCP** tab.
-2. Click **Add custom connector**.
-3. Set **Connector type** to **Command**.
-4. **Name**: `repo-memory`, **Display name**: `Repo Memory`.
-5. **Command**: `C:\Users\liza\repo-memory\.venv\Scripts\python.exe`
-6. **Arguments** (one per line): `C:\Users\liza\repo-memory\mcp_server.py`
-7. Save. The connector is now available to your agents.
-
-Alan starts this program inside each agent run, on your computer or in the cloud sandbox, so the path above must exist wherever the agent runs. For a cloud sandbox, expose the server over HTTPS instead and use the **URL** connector type.
-
 ## Built with
 
-Built with **Alan (DeepSeek V4.1 Flash)** as the coding harness, plus open models: **all-MiniLM-L6-v2** for embeddings and **openai/gpt-oss-120b** (served by Groq) for answering, query rewriting, and the decision log. Storage is ChromaDB; the interface is Streamlit with Plotly.
+Built with **Alan (DeepSeek V4.1 Flash)** as the coding harness, plus open models: **all-MiniLM-L6-v2** for embeddings, **openai/gpt-oss-120b** (Groq) for the final answer, and **openai/gpt-oss-20b** (Groq) for query rewriting and the incremental decision log. Storage is ChromaDB; the interface is Streamlit with Plotly.

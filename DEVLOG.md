@@ -121,7 +121,7 @@ Three bugs came out of that feedback, all of which only a fresh install would sh
 
 Also tightened the answer prompt so the model does not add background knowledge that is not in the commits, and made sure citations written as [ f140c94 ] or 【f140c94】 are turned into [f140c94] before they are turned into links.
 
-## 9:15 PM – Staying inside the token budget
+## 10:30 AM, 27 Oct – Staying inside the token budget
 
 Groq's free tier counts every token against one daily budget, and by the end of the day my own testing had eaten it: the app answered with an HTTP 429 instead of an answer, which is a bad look in a demo. Three changes to bring the cost down:
 
