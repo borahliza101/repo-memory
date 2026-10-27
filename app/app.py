@@ -41,7 +41,7 @@ from repo_memory.timefmt import format_ist, to_ist
 st.set_page_config(page_title="Repo Memory", page_icon="🧠")
 
 COLOR_USED = "#8b5cf6"  # violet dot for commits the answer used
-COLOR_OTHER = "rgba(203, 213, 225, 0.6)"  # light grey for the rest
+COLOR_OTHER = "rgba(203, 213, 225, 0.7)"  # light grey for the rest
 PREFERRED_REPO = "borahliza101/repo-memory"  # demo default, when it has a memory
 
 SUGGESTIONS = {
@@ -183,34 +183,24 @@ def linkify(text, repo, commits):
 
 
 def timeline_figure(commits, used_shas):
-    """One dot per commit on a date axis; used commits are bigger and labelled."""
+    """One dot per commit on a date axis; used commits are bigger and violet.
+
+    No text labels on the chart: nearby commits would overlap. The app draws a
+    legend row underneath instead, and the hover tooltip has sha + message.
+    """
     used = set(used_shas)
     is_used = [commit["sha"] in used for commit in commits]
-
-    # Alternate the sha labels above and below the dots, so neighbours don't overlap.
-    positions = []
-    label_index = 0
-    for flag in is_used:
-        if flag:
-            positions.append("top center" if label_index % 2 == 0 else "bottom center")
-            label_index += 1
-        else:
-            positions.append("top center")
 
     figure = go.Figure(
         go.Scatter(
             x=[to_ist(commit["date"]).replace(tzinfo=None) for commit in commits],
             y=[0] * len(commits),
-            mode="markers+text",
+            mode="markers",
             marker={
-                "size": [18 if flag else 10 for flag in is_used],
+                "size": [20 if flag else 12 for flag in is_used],
                 "color": [COLOR_USED if flag else COLOR_OTHER for flag in is_used],
                 "line": {"width": 0},
             },
-            text=[commit["sha"][:7] if flag else "" for commit, flag in zip(commits, is_used)],
-            textposition=positions,
-            textfont={"size": 11, "color": "#e2e8f0"},
-            cliponaxis=False,  # keep sha labels visible above the dots
             customdata=[commit["sha"] for commit in commits],  # lets clicks find the commit
             hovertext=[
                 f"{commit['sha'][:7]} · {format_ist(commit['date'])}<br>{commit['message']}"
@@ -221,7 +211,7 @@ def timeline_figure(commits, used_shas):
     )
     figure.update_layout(
         height=180,
-        margin={"l": 8, "r": 8, "t": 26, "b": 8},  # tight margins: no dead space
+        margin={"l": 8, "r": 8, "t": 12, "b": 8},  # tight margins: no dead space
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         showlegend=False,
@@ -599,6 +589,18 @@ if commits:
         on_select="rerun",
         selection_mode="points",
     )
+
+    # The chart draws no text labels (they overlap); list the highlighted
+    # commits underneath instead, in the order the answer used them.
+    if used_shas:
+        by_sha = {commit["sha"]: commit for commit in commits}
+        legend = [
+            f"`{sha[:7]}` {format_ist(by_sha[sha]['date'])[:10]}"
+            for sha in used_shas
+            if sha in by_sha
+        ]
+        if legend:
+            st.caption("Highlighted: " + " · ".join(legend))
 
     # Clicking a dot opens that commit's details below the timeline.
     selection = st.session_state.get("timeline") or {}

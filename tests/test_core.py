@@ -150,6 +150,13 @@ class LLMTests(unittest.TestCase):
             "Fixed in [f140c94] and [f780219].",
         )
 
+    def test_normalize_citation_missing_closing_bracket(self):
+        # The model sometimes drops the "]" at the end of a sentence.
+        self.assertEqual(llm.normalize_citations("Recorded in [ f780219."), "Recorded in [f780219].")
+        self.assertEqual(llm.normalize_citations("See [f780219, then more"), "See [f780219], then more")
+        # A complete citation must not be changed twice.
+        self.assertEqual(llm.normalize_citations("See [f780219]."), "See [f780219].")
+
     def test_normalize_stream_handles_split_brackets(self):
         chunks = ["Because ", "【6f66", "281】 and ", "【", "25340eb", "】."]
         self.assertEqual("".join(llm.normalize_stream(iter(chunks))), "Because [6f66281] and [25340eb].")

@@ -110,7 +110,7 @@ The suite covers the pure logic with no network and no real model: repo parsing,
 python -m unittest discover -s tests -v
 ```
 
-24 unit tests. `python test_mcp.py` is a separate end-to-end check of the MCP server; it does call Groq, so it needs a working `GROQ_API_KEY`.
+25 unit tests. `python test_mcp.py` is a separate end-to-end check of the MCP server; it does call Groq, so it needs a working `GROQ_API_KEY`.
 
 ## How to run it
 

@@ -123,11 +123,15 @@ def answer_question(question, matches, repo=None):
 def normalize_citations(answer):
     """Tidy up how the model writes citations.
 
-    Models sometimes wrap citations in full-width brackets 【sha】, or put spaces
-    inside them like [ sha ]. Both become [sha], so the app can link them.
+    Models sometimes wrap citations in full-width brackets 【sha】, put spaces
+    inside them like [ sha ], or forget the closing bracket like [ sha. All
+    become [sha], so the app can link them.
     """
     answer = re.sub(r"【([0-9a-f]{7})】", r"[\1]", answer)
     answer = re.sub(r"\[\s*([0-9a-f]{7})\s*\]", r"[\1]", answer)
+    # Missing closing bracket: "[ f780219." or "[f780219," (runs after the
+    # complete-bracket rules above, so a valid [sha] is never touched).
+    answer = re.sub(r"\[\s*([0-9a-f]{7})(?=[.,;:!?)]|$)", r"[\1]", answer)
     return answer
 
 
